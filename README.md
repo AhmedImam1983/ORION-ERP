@@ -1,58 +1,143 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Orion ERP
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+**Orion ERP** is a modular business management system built with Laravel and Filament. It brings day-to-day operations—including sales, invoicing, point of sale, inventory, customer and supplier records, and financial reporting—into one application.
 
-## About Laravel
+> This README describes the project structure and setup based on the repository. Configure and test each integration in your own environment before using it in production.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Core areas
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- **Sales and invoicing** — manage invoices and related records.
+- **Point of sale (POS)** — support cashier workflows and receipts.
+- **Inventory** — manage products and inventory-related operations.
+- **Customers and suppliers** — maintain business partner records.
+- **Accounting and reports** — provide financial data and reporting features.
+- **Installments** — generate and record installment payments.
+- **Exports and documents** — generate PDF documents, barcode labels, and Excel exports.
+- **Attachments** — upload and manage files associated with application records.
+- **Integrations** — configuration points for services such as WhatsApp and e-invoicing.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Available features and permissions depend on the current implementation and environment configuration.
 
-## Learning Laravel
+## Technology stack
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP `^8.3`
+- Laravel `^13.8`
+- Filament `^5.6`
+- MySQL or another database supported by the configured Laravel connection
+- Node.js and npm for frontend assets
+- Composer for PHP dependencies
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+See `composer.json` and `package.json` for the authoritative dependency lists.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## Requirements
 
-## Agentic Development
+Install versions compatible with the constraints in `composer.json` and `package.json`:
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+- PHP and Composer
+- A supported database server
+- Node.js and npm
+- PHP extensions required by Laravel and the installed packages
+
+## Local installation
+
+1. Clone the repository and enter the project directory:
+
+   ```bash
+   git clone https://github.com/AhmedImam1983/ORION-ERP.git
+   cd ORION-ERP
+   ```
+
+2. Install PHP dependencies:
+
+   ```bash
+   composer install
+   ```
+
+3. Create your local environment file and generate an application key:
+
+   **Windows PowerShell**
+   ```powershell
+   Copy-Item .env.example .env
+   php artisan key:generate
+   ```
+
+   **Linux / macOS**
+   ```bash
+   cp .env.example .env
+   php artisan key:generate
+   ```
+
+4. Configure `.env` for your local database and any services you intend to use. Do not commit `.env` or real credentials.
+
+5. Create the database, then run migrations:
+
+   ```bash
+   php artisan migrate
+   ```
+
+6. Install frontend dependencies and build assets:
+
+   ```bash
+   npm install
+   npm run build
+   ```
+
+7. Start the local development server:
+
+   ```bash
+   php artisan serve
+   ```
+
+Open the local URL printed by Artisan. Follow the application's existing authentication and user-provisioning process to access the admin panel.
+
+## Scheduled tasks and background work
+
+The repository defines scheduled commands for database backups and daily alerts in `routes/console.php`. Configure Laravel's scheduler in the deployment environment and verify that the referenced commands are installed and working before relying on them.
+
+If queue workers are used by your configured features, run and supervise them according to your deployment setup.
+
+## Configuration and integrations
+
+Review the configuration files and `.env.example` for the variables used by your deployment, including database access and any enabled third-party integrations.
+
+- Keep production credentials in environment variables or a secrets manager.
+- Never commit `.env`, API tokens, private keys, database dumps, or real customer data.
+- Set `APP_ENV=production` and `APP_DEBUG=false` in production.
+- Use HTTPS and secure session/cookie settings in production.
+- Configure backup storage with restricted access, retention, and restore testing.
+- Test external integrations in a non-production environment before enabling them for real transactions.
+
+## Testing and code quality
+
+Run the test suite with:
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+php artisan test
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+You can also run Laravel Pint if it is installed:
 
-## Contributing
+```bash
+vendor/bin/pint --test
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+The current test suite may not cover every business workflow. Add regression tests for permissions, branch isolation, invoice numbering, inventory movements, installments, accounting entries, and report exports as those areas are validated.
 
-## Code of Conduct
+## Deployment checklist
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Before deploying to production:
 
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- [ ] Install dependencies using the versions supported by the lock files.
+- [ ] Configure production environment variables and generate a unique `APP_KEY`.
+- [ ] Set `APP_DEBUG=false`.
+- [ ] Apply migrations after backing up the database.
+- [ ] Build frontend assets.
+- [ ] Configure HTTPS, file permissions, scheduler, and queue workers as required.
+- [ ] Verify authorization and branch-level data isolation.
+- [ ] Test backup creation and restoration.
+- [ ] Run automated tests and critical business-flow checks.
+- [ ] Confirm that secrets, local files, and real data are not included in Git.
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+No project-specific license information was verified as part of this README update. Confirm the intended license before distributing Orion ERP.
