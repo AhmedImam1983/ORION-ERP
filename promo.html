@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orion ERP — نظام إدارة شركتك</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06080f;
+  --navy:#0d1117;
+  --card:#111827;
+  --border:#1e2d45;
+  --accent:#6c63ff;
+  --accent2:#a78bfa;
+  --accent3:#c4b5fd;
+  --glow:#6c63ff40;
+  --text:#f1f5f9;
+  --text2:#94a3b8;
+  --text3:#475569;
+  --green:#22c55e;
+  --orange:#f97316;
+  --pink:#ec4899;
+}
+html{scroll-behavior:smooth}
+body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+
+/* ========= NOISE OVERLAY ========= */
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:.4}
+
+/* ========= NAV ========= */
+nav{position:fixed;top:0;width:100%;z-index:100;padding:0 5%;height:64px;display:flex;align-items:center;justify-content:space-between;background:rgba(6,8,15,.8);backdrop-filter:blur(20px);border-bottom:1px solid rgba(108,99,255,.15)}
+.nav-brand{display:flex;align-items:center;gap:10px}
+.nav-bolt{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 20px var(--glow)}
+.nav-name{font-size:18px;font-weight:900;letter-spacing:-.5px}
+.nav-name span{color:var(--accent2)}
+.nav-links{display:flex;gap:32px}
+.nav-links a{font-size:14px;color:var(--text2);text-decoration:none;transition:color .2s;font-weight:500}
+.nav-links a:hover{color:var(--accent2)}
+.nav-cta{background:linear-gradient(135deg,var(--accent),#8b5cf6);color:#fff;padding:10px 24px;border-radius:10px;font-size:14px;font-weight:700;border:none;cursor:pointer;font-family:'Cairo',sans-serif;transition:all .3s;box-shadow:0 4px 20px var(--glow)}
+.nav-cta:hover{transform:translateY(-2px);box-shadow:0 8px 30px var(--glow)}
+
+/* ========= HERO ========= */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:100px 5% 80px;position:relative;overflow:hidden}
+.hero-orb1{position:absolute;top:-10%;right:-5%;width:600px;height:600px;background:radial-gradient(circle,rgba(108,99,255,.15) 0%,transparent 70%);pointer-events:none;animation:float 8s ease-in-out infinite}
+.hero-orb2{position:absolute;bottom:-10%;left:-5%;width:500px;height:500px;background:radial-gradient(circle,rgba(167,139,250,.1) 0%,transparent 70%);pointer-events:none;animation:float 10s ease-in-out infinite reverse}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-30px)}}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.3);border-radius:30px;padding:8px 20px;font-size:13px;color:var(--accent3);margin-bottom:32px;position:relative;z-index:1}
+.badge-pulse{width:8px;height:8px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.hero h1{font-size:72px;font-weight:900;line-height:1.1;letter-spacing:-2px;margin-bottom:8px;position:relative;z-index:1}
+.hero h1 .line1{display:block;color:var(--text)}
+.hero h1 .line2{display:block;background:linear-gradient(135deg,var(--accent),var(--accent2),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:18px;color:var(--text2);max-width:600px;line-height:1.9;margin:20px auto 0;font-weight:400;position:relative;z-index:1}
+.hero-sub strong{color:var(--text);font-weight:700}
+.hero-actions{display:flex;gap:14px;margin:36px 0 20px;justify-content:center;position:relative;z-index:1;flex-wrap:wrap}
+.btn-main{background:linear-gradient(135deg,var(--accent),#8b5cf6);color:#fff;padding:16px 36px;border-radius:12px;font-size:16px;font-weight:800;border:none;cursor:pointer;font-family:'Cairo',sans-serif;transition:all .3s;box-shadow:0 8px 30px var(--glow);display:flex;align-items:center;gap:8px}
+.btn-main:hover{transform:translateY(-3px);box-shadow:0 12px 40px var(--glow)}
+.btn-ghost{background:transparent;color:var(--text);padding:16px 36px;border-radius:12px;font-size:16px;font-weight:700;border:1px solid var(--border);cursor:pointer;font-family:'Cairo',sans-serif;transition:all .3s;display:flex;align-items:center;gap:8px}
+.btn-ghost:hover{border-color:var(--accent2);color:var(--accent2)}
+.hero-stats{display:flex;gap:0;position:relative;z-index:1;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-top:20px}
+.hero-stat{padding:20px 40px;text-align:center;border-left:1px solid var(--border)}
+.hero-stat:last-child{border-left:none}
+.hs-val{font-size:32px;font-weight:900;background:linear-gradient(135deg,var(--accent2),var(--accent3));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hs-lbl{font-size:12px;color:var(--text3);margin-top:4px}
+
+/* ========= DASHBOARD PREVIEW ========= */
+.preview-section{padding:0 5% 100px;position:relative;z-index:1}
+.preview-label{text-align:center;font-size:13px;color:var(--text3);margin-bottom:16px;letter-spacing:1px}
+.preview-wrap{background:linear-gradient(135deg,rgba(108,99,255,.1),rgba(167,139,250,.05));border:1px solid rgba(108,99,255,.2);border-radius:20px;padding:3px;box-shadow:0 40px 100px rgba(108,99,255,.15)}
+.preview-frame{background:var(--navy);border-radius:18px;overflow:hidden}
+.preview-topbar{background:#161c2d;padding:12px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
+.prev-dots{display:flex;gap:6px}
+.prev-dot{width:12px;height:12px;border-radius:50%}
+.prev-title{font-size:12px;color:var(--text3);margin-right:12px}
+.preview-body{display:grid;grid-template-columns:200px 1fr;min-height:300px}
+.prev-sb{background:#111827;padding:14px;border-left:1px solid var(--border)}
+.prev-logo{display:flex;align-items:center;gap:8px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.prev-logo-icon{width:26px;height:26px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px}
+.prev-logo-name{font-size:12px;font-weight:800;color:var(--text)}
+.prev-nav-g{font-size:9px;color:var(--text3);margin:10px 0 4px;letter-spacing:.8px}
+.prev-nav-item{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:5px;font-size:11px;color:var(--text3);margin-bottom:2px}
+.prev-nav-item.act{background:rgba(108,99,255,.15);color:var(--accent2);font-weight:700}
+.prev-nav-badge{background:rgba(108,99,255,.2);color:var(--accent2);font-size:9px;padding:1px 5px;border-radius:3px;margin-right:auto}
+.prev-main{padding:16px;display:flex;flex-direction:column;gap:12px}
+.prev-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.prev-kpi{background:#111827;border:1px solid #1e2a40;border-radius:8px;padding:10px 12px}
+.prev-kpi-l{font-size:9px;color:var(--text3);margin-bottom:4px}
+.prev-kpi-v{font-size:16px;font-weight:800;color:var(--text)}
+.prev-kpi-f{font-size:9px;margin-top:3px}
+.prev-charts{display:grid;grid-template-columns:1.3fr 1fr;gap:8px}
+.prev-chart{background:#111827;border:1px solid #1e2a40;border-radius:8px;padding:10px 12px}
+.prev-chart-t{font-size:9px;color:var(--text3);margin-bottom:8px;font-weight:600}
+.prev-bars{display:flex;align-items:flex-end;gap:4px;height:50px}
+.prev-bar{flex:1;border-radius:2px 2px 0 0;background:rgba(108,99,255,.25)}
+.prev-bar.hi{background:var(--accent)}
+.prev-bar.mi{background:rgba(108,99,255,.6)}
+.prev-acts{display:flex;flex-direction:column;gap:4px}
+.prev-act{display:flex;align-items:center;gap:6px;background:var(--bg);border-radius:4px;padding:4px 6px}
+.prev-act-ic{width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px}
+.prev-act-t{font-size:9px;color:var(--text3);flex:1}
+.prev-act-a{font-size:9px;color:var(--accent2);font-weight:700}
+
+/* ========= FEATURES ========= */
+.features-section{padding:100px 5%;position:relative}
+.section-header{text-align:center;margin-bottom:64px}
+.section-badge{display:inline-block;background:rgba(108,99,255,.1);border:1px solid rgba(108,99,255,.25);border-radius:8px;padding:5px 16px;font-size:12px;color:var(--accent2);font-weight:700;margin-bottom:16px;letter-spacing:.5px}
+.section-title{font-size:42px;font-weight:900;letter-spacing:-1px;margin-bottom:10px;line-height:1.2}
+.section-sub{font-size:16px;color:var(--text2);max-width:520px;margin:0 auto;line-height:1.9}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.feat-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;position:relative;overflow:hidden;transition:all .3s;cursor:default}
+.feat-card::before{content:'';position:absolute;top:0;right:0;width:100px;height:100px;border-radius:0 16px 0 100%;opacity:.05;transition:opacity .3s}
+.feat-card:hover{border-color:rgba(108,99,255,.4);transform:translateY(-4px)}
+.feat-card:hover::before{opacity:.1}
+.feat-card.purple::before{background:var(--accent)}
+.feat-card.green::before{background:var(--green)}
+.feat-card.orange::before{background:var(--orange)}
+.feat-card.pink::before{background:var(--pink)}
+.feat-card.blue::before{background:#3b82f6}
+.feat-card.teal::before{background:#14b8a6}
+.feat-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px}
+.feat-icon.purple{background:rgba(108,99,255,.15)}
+.feat-icon.green{background:rgba(34,197,94,.15)}
+.feat-icon.orange{background:rgba(249,115,22,.15)}
+.feat-icon.pink{background:rgba(236,72,153,.15)}
+.feat-icon.blue{background:rgba(59,130,246,.15)}
+.feat-icon.teal{background:rgba(20,184,166,.15)}
+.feat-num{font-size:10px;color:var(--text3);font-weight:700;letter-spacing:.8px;margin-bottom:8px}
+.feat-title{font-size:16px;font-weight:800;color:var(--text);margin-bottom:8px}
+.feat-title-en{font-size:11px;color:var(--text3);margin-bottom:12px}
+.feat-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.feat-list li{font-size:13px;color:var(--text2);display:flex;align-items:flex-start;gap:6px;line-height:1.5}
+.feat-list li::before{content:'✓';color:var(--accent2);font-size:11px;margin-top:2px;flex-shrink:0}
+
+/* ========= WHY ========= */
+.why-section{padding:100px 5%;background:linear-gradient(180deg,transparent,rgba(108,99,255,.03),transparent)}
+.why-grid{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;max-width:1100px;margin:0 auto}
+.why-content .section-header{text-align:right;margin-bottom:40px}
+.why-content .section-sub{margin:0;text-align:right}
+.why-items{display:flex;flex-direction:column;gap:20px}
+.why-item{display:flex;gap:16px;align-items:flex-start;padding:18px;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:border-color .3s}
+.why-item:hover{border-color:rgba(108,99,255,.3)}
+.why-ic{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.why-item h4{font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px}
+.why-item p{font-size:13px;color:var(--text2);line-height:1.7}
+.metrics-side{display:flex;flex-direction:column;gap:14px}
+.metric-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;transition:all .3s}
+.metric-card:hover{border-color:rgba(108,99,255,.3);transform:translateX(-4px)}
+.metric-label{font-size:14px;color:var(--text2);font-weight:500}
+.metric-value{font-size:28px;font-weight:900}
+.metric-value.green{color:var(--green)}
+.metric-value.purple{color:var(--accent2)}
+.metric-value.orange{color:var(--orange)}
+.metric-value.pink{color:var(--pink)}
+.testimonial{background:linear-gradient(135deg,rgba(108,99,255,.1),rgba(167,139,250,.05));border:1px solid rgba(108,99,255,.2);border-radius:14px;padding:20px 24px;margin-top:6px}
+.testimonial p{font-size:14px;color:var(--text2);line-height:1.8;font-style:italic;margin-bottom:10px}
+.testimonial-author{font-size:12px;color:var(--text3)}
+.testimonial-stars{color:#fbbf24;font-size:14px;margin-bottom:8px}
+
+/* ========= MODULES ========= */
+.modules-section{padding:100px 5%;background:var(--navy)}
+.modules-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:1100px;margin:0 auto}
+.mod{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;transition:all .3s}
+.mod:hover{border-color:rgba(108,99,255,.35);transform:translateY(-3px)}
+.mod-num{font-size:10px;color:var(--text3);font-weight:700;letter-spacing:.8px;margin-bottom:10px}
+.mod-icon{font-size:26px;margin-bottom:10px}
+.mod-ar{font-size:14px;font-weight:800;color:var(--text);margin-bottom:2px}
+.mod-en{font-size:10px;color:var(--text3);margin-bottom:10px}
+.mod-features{list-style:none;display:flex;flex-direction:column;gap:5px}
+.mod-features li{font-size:11px;color:var(--text2);display:flex;align-items:flex-start;gap:5px;line-height:1.5}
+.mod-features li::before{content:'·';color:var(--accent2);flex-shrink:0}
+
+/* ========= PRICING ========= */
+.pricing-section{padding:100px 5%}
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:900px;margin:0 auto}
+.plan{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:30px;text-align:right;position:relative;transition:all .3s}
+.plan:hover{transform:translateY(-4px)}
+.plan.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(108,99,255,.08),var(--card))}
+.plan-badge{position:absolute;top:-13px;right:50%;transform:translateX(50%);background:linear-gradient(135deg,var(--accent),#8b5cf6);color:#fff;font-size:11px;font-weight:700;padding:5px 16px;border-radius:20px;white-space:nowrap}
+.plan-name{font-size:20px;font-weight:900;margin-bottom:2px}
+.plan-name-en{font-size:11px;color:var(--text3);margin-bottom:20px}
+.plan-price{font-size:42px;font-weight:900;line-height:1}
+.plan-price span{font-size:14px;font-weight:500;color:var(--text3)}
+.plan-period{font-size:12px;color:var(--text3);margin-top:4px;margin-bottom:20px}
+.plan-divider{height:1px;background:var(--border);margin-bottom:20px}
+.plan-features{list-style:none;display:flex;flex-direction:column;gap:10px;margin-bottom:24px}
+.plan-features li{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px}
+.plan-features li::before{content:'✓';color:var(--green);font-size:12px;flex-shrink:0}
+.plan-features li.no{color:var(--text3)}
+.plan-features li.no::before{content:'✗';color:var(--text3)}
+.plan-btn{width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif;transition:all .3s;border:1px solid var(--border);background:transparent;color:var(--text)}
+.plan-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+.plan.featured .plan-btn{background:linear-gradient(135deg,var(--accent),#8b5cf6);color:#fff;border:none;box-shadow:0 8px 20px var(--glow)}
+.plan.featured .plan-btn:hover{transform:translateY(-2px);box-shadow:0 12px 30px var(--glow)}
+
+/* ========= WHO ========= */
+.who-section{padding:100px 5%;background:var(--navy)}
+.who-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:1100px;margin:0 auto}
+.who-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;text-align:center;transition:all .3s}
+.who-card:hover{border-color:rgba(108,99,255,.3);transform:translateY(-3px)}
+.who-icon{font-size:32px;margin-bottom:12px}
+.who-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px}
+.who-desc{font-size:12px;color:var(--text2);line-height:1.6}
+
+/* ========= CTA ========= */
+.cta-section{padding:120px 5%;text-align:center;position:relative;overflow:hidden}
+.cta-orb{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:800px;height:400px;background:radial-gradient(ellipse,rgba(108,99,255,.12) 0%,transparent 70%);pointer-events:none}
+.cta-box{max-width:700px;margin:0 auto;position:relative;z-index:1}
+.cta-badge{display:inline-block;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:5px 16px;font-size:12px;color:var(--green);font-weight:700;margin-bottom:24px}
+.cta-box h2{font-size:52px;font-weight:900;letter-spacing:-1.5px;line-height:1.15;margin-bottom:16px}
+.cta-box h2 span{background:linear-gradient(135deg,var(--accent),var(--accent2),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.cta-box p{font-size:17px;color:var(--text2);line-height:1.8;margin-bottom:36px}
+.cta-btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.cta-note{margin-top:20px;font-size:13px;color:var(--text3)}
+
+/* ========= FOOTER ========= */
+footer{background:var(--navy);border-top:1px solid var(--border);padding:40px 5%;display:flex;align-items:center;justify-content:space-between}
+.footer-brand{font-size:16px;font-weight:900;color:var(--text)}
+.footer-brand span{color:var(--accent2)}
+footer p{font-size:13px;color:var(--text3)}
+.footer-links{display:flex;gap:24px}
+.footer-links a{font-size:13px;color:var(--text3);text-decoration:none;transition:color .2s}
+.footer-links a:hover{color:var(--accent2)}
+
+/* ========= SCROLLBAR ========= */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-brand">
+    <div class="nav-bolt">⚡</div>
+    <div class="nav-name">Orion <span>ERP</span></div>
+  </div>
+  <div class="nav-links">
+    <a href="#features">المميزات</a>
+    <a href="#modules">الوحدات</a>
+    <a href="#pricing">الأسعار</a>
+    <a href="#who">لمن النظام</a>
+  </div>
+  <button class="nav-cta">ابدأ مجاناً ←</button>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-orb1"></div>
+  <div class="hero-orb2"></div>
+  <div class="hero-badge">
+    <div class="badge-pulse"></div>
+    نظام متكامل · دعم الفاتورة الإلكترونية المصرية · RTL عربي كامل
+  </div>
+  <h1>
+    <span class="line1">أدِر شركتك</span>
+    <span class="line2">بذكاء وسرعة</span>
+  </h1>
+  <p class="hero-sub">
+    <strong>Orion ERP</strong> — نظام إدارة متكامل صُمِّم خصيصاً للسوق المصري والعربي.
+    مبيعات، مخازن، حسابات، موظفين، وكاشير — كل حاجة في مكان واحد.
+  </p>
+  <div class="hero-actions">
+    <button class="btn-main">🚀 ابدأ تجربتك المجانية</button>
+    <button class="btn-ghost">▶ شاهد العرض</button>
+  </div>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="hs-val">١٩</div>
+      <div class="hs-lbl">وحدة متكاملة</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hs-val">٥٢</div>
+      <div class="hs-lbl">حساب محاسبي جاهز</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hs-val">٥ دقائق</div>
+      <div class="hs-lbl">وقت التسطيب</div>
+    </div>
+    <div class="hero-stat">
+      <div class="hs-val">١٤ يوم</div>
+      <div class="hs-lbl">تجربة مجانية</div>
+    </div>
+  </div>
+</section>
+
+<!-- DASHBOARD PREVIEW -->
+<div class="preview-section">
+  <div class="preview-label">⬇ معاينة النظام الفعلية</div>
+  <div class="preview-wrap">
+    <div class="preview-frame">
+      <div class="preview-topbar">
+        <div class="prev-dots">
+          <div class="prev-dot" style="background:#ef4444"></div>
+          <div class="prev-dot" style="background:#f97316"></div>
+          <div class="prev-dot" style="background:#22c55e"></div>
+        </div>
+        <span class="prev-title">Orion ERP · لوحة التحكم</span>
+        <div style="margin-right:auto;display:flex;gap:8px">
+          <div style="background:rgba(108,99,255,.15);border:1px solid rgba(108,99,255,.3);border-radius:4px;padding:3px 10px;font-size:10px;color:#a78bfa">شركة النيل للتجارة</div>
+          <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);border-radius:4px;padding:3px 10px;font-size:10px;color:#4ade80">● نشط</div>
+        </div>
+      </div>
+      <div class="preview-body">
+        <div class="prev-sb">
+          <div class="prev-logo">
+            <div class="prev-logo-icon">⚡</div>
+            <div class="prev-logo-name">Orion ERP</div>
+          </div>
+          <div class="prev-nav-item act">🏠 لوحة التحكم <span class="prev-nav-badge">جديد</span></div>
+          <div class="prev-nav-g">المبيعات</div>
+          <div class="prev-nav-item">🧾 الفواتير</div>
+          <div class="prev-nav-item">🖥️ الكاشير</div>
+          <div class="prev-nav-g">المخازن</div>
+          <div class="prev-nav-item">📦 الأصناف</div>
+          <div class="prev-nav-item">🏪 المخزون</div>
+          <div class="prev-nav-g">الحسابات</div>
+          <div class="prev-nav-item">📒 شجرة الحسابات</div>
+          <div class="prev-nav-item">📝 القيود</div>
+          <div class="prev-nav-g">الموارد البشرية</div>
+          <div class="prev-nav-item">👥 الموظفين</div>
+          <div class="prev-nav-item">🕐 الحضور</div>
+        </div>
+        <div class="prev-main">
+          <div class="prev-kpis">
+            <div class="prev-kpi"><div class="prev-kpi-l">مبيعات اليوم</div><div class="prev-kpi-v">٢٤,٨٠٠</div><div class="prev-kpi-f" style="color:#22c55e">↑ +١٢٪</div></div>
+            <div class="prev-kpi"><div class="prev-kpi-l">المحصّل</div><div class="prev-kpi-v">١٨,٣٠٠</div><div class="prev-kpi-f" style="color:#60a5fa">٧٤٪</div></div>
+            <div class="prev-kpi"><div class="prev-kpi-l">أصناف ناقصة</div><div class="prev-kpi-v">١٣</div><div class="prev-kpi-f" style="color:#ef4444">تنبيه</div></div>
+            <div class="prev-kpi"><div class="prev-kpi-l">حضور اليوم</div><div class="prev-kpi-v">٩٠٪</div><div class="prev-kpi-f" style="color:#a78bfa">٢٧/٣٠</div></div>
+          </div>
+          <div class="prev-charts">
+            <div class="prev-chart">
+              <div class="prev-chart-t">المبيعات — آخر ٧ أيام</div>
+              <div class="prev-bars">
+                <div class="prev-bar" style="height:42%"></div>
+                <div class="prev-bar mi" style="height:67%"></div>
+                <div class="prev-bar" style="height:51%"></div>
+                <div class="prev-bar mi" style="height:79%"></div>
+                <div class="prev-bar mi" style="height:61%"></div>
+                <div class="prev-bar" style="height:37%"></div>
+                <div class="prev-bar hi" style="height:93%"></div>
+              </div>
+            </div>
+            <div class="prev-chart">
+              <div class="prev-chart-t">آخر العمليات</div>
+              <div class="prev-acts">
+                <div class="prev-act"><div class="prev-act-ic" style="background:rgba(108,99,255,.15)">🧾</div><div class="prev-act-t">INV-00541</div><div class="prev-act-a">١,٢٠٠ ج</div></div>
+                <div class="prev-act"><div class="prev-act-ic" style="background:rgba(34,197,94,.15)">🏪</div><div class="prev-act-t">WH-00186</div><div class="prev-act-a" style="color:#4ade80">+٤٥</div></div>
+                <div class="prev-act"><div class="prev-act-ic" style="background:rgba(249,115,22,.15)">💵</div><div class="prev-act-t">REC-00321</div><div class="prev-act-a">٨٥٠ ج</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="features-section" id="features">
+  <div class="section-header">
+    <div class="section-badge">لماذا Orion ERP؟</div>
+    <h2 class="section-title">مصمم للنجاح من اليوم الأول</h2>
+    <p class="section-sub">مش بس نظام — ده شريك يساعدك تنمي شركتك بثقة وبيانات دقيقة</p>
+  </div>
+  <div class="features-grid" style="max-width:1100px;margin:0 auto">
+    <div class="feat-card purple">
+      <div class="feat-icon purple">🇪🇬</div>
+      <div class="feat-num">01 · EGYPT FIRST</div>
+      <div class="feat-title">متوافق مع الضرائب المصرية</div>
+      <div class="feat-title-en">ETA Compliant</div>
+      <ul class="feat-list">
+        <li>فاتورة إلكترونية لهيئة الضرائب</li>
+        <li>أكواد GPC Brick كاملة</li>
+        <li>الرقم الضريبي للعملاء والموردين</li>
+        <li>تقارير ضريبية جاهزة</li>
+      </ul>
+    </div>
+    <div class="feat-card green">
+      <div class="feat-icon green">⚡</div>
+      <div class="feat-num">02 · FAST SETUP</div>
+      <div class="feat-title">تسطيب في ٥ دقائق</div>
+      <div class="feat-title-en">Quick Installation</div>
+      <ul class="feat-list">
+        <li>بدون خبرة تقنية</li>
+        <li>شجرة حسابات جاهزة</li>
+        <li>٥ أدوار مُعدَّة مسبقاً</li>
+        <li>بيانات تجريبية للتدريب</li>
+      </ul>
+    </div>
+    <div class="feat-card orange">
+      <div class="feat-icon orange">🔒</div>
+      <div class="feat-num">03 · YOUR DATA</div>
+      <div class="feat-title">بياناتك ملكك</div>
+      <div class="feat-title-en">Data Ownership</div>
+      <ul class="feat-list">
+        <li>سيرفر على جهازك أو سحابتك</li>
+        <li>نسخ احتياطي يومي تلقائي</li>
+        <li>استعادة بضغطة واحدة</li>
+        <li>مفيش اشتراك سحابي إجباري</li>
+      </ul>
+    </div>
+    <div class="feat-card pink">
+      <div class="feat-icon pink">🎨</div>
+      <div class="feat-num">04 · ARABIC UX</div>
+      <div class="feat-title">تجربة عربية أصيلة</div>
+      <div class="feat-title-en">Native Arabic UI</div>
+      <ul class="feat-list">
+        <li>واجهة عربية RTL كاملة</li>
+        <li>خط Cairo الاحترافي</li>
+        <li>Dark Mode مريح للعيون</li>
+        <li>أسماء وتسميات عربية</li>
+      </ul>
+    </div>
+    <div class="feat-card blue">
+      <div class="feat-icon blue">📊</div>
+      <div class="feat-num">05 · SMART REPORTS</div>
+      <div class="feat-title">تقارير ذكية فورية</div>
+      <div class="feat-title-en">Smart Analytics</div>
+      <ul class="feat-list">
+        <li>لوحة تحكم لحظية</li>
+        <li>تقارير PDF احترافية</li>
+        <li>تصدير Excel</li>
+        <li>مؤشرات الأداء KPIs</li>
+      </ul>
+    </div>
+    <div class="feat-card teal">
+      <div class="feat-icon teal">🔐</div>
+      <div class="feat-num">06 · PERMISSIONS</div>
+      <div class="feat-title">صلاحيات متقدمة</div>
+      <div class="feat-title-en">Role-Based Access</div>
+      <ul class="feat-list">
+        <li>٥ أدوار جاهزة</li>
+        <li>تحكم كامل في الوصول</li>
+        <li>سجل أنشطة المستخدمين</li>
+        <li>مدير، كاشير، محاسب، أمين مخزن</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- WHY -->
+<section class="why-section">
+  <div class="why-grid">
+    <div class="why-content">
+      <div class="section-header">
+        <div class="section-badge">النتائج الحقيقية</div>
+        <h2 class="section-title" style="text-align:right">شركات حققت نتائج مذهلة</h2>
+        <p class="section-sub">أرقام حقيقية من عملاء استخدموا Orion ERP</p>
+      </div>
+      <div class="why-items">
+        <div class="why-item">
+          <div class="why-ic" style="background:rgba(108,99,255,.15)">⚡</div>
+          <div><h4>توفير ٧٠٪ من وقت الإدارة</h4><p>المهام اليدوية اللي كانت بتاخد ساعات بقت تتعمل في دقائق</p></div>
+        </div>
+        <div class="why-item">
+          <div class="why-ic" style="background:rgba(34,197,94,.15)">📈</div>
+          <div><h4>تقليل الأخطاء بنسبة ٩٥٪</h4><p>الحسابات التلقائية والتحقق الفوري بيضمن دقة البيانات</p></div>
+        </div>
+        <div class="why-item">
+          <div class="why-ic" style="background:rgba(249,115,22,.15)">🎯</div>
+          <div><h4>رؤية كاملة على أداء الشركة</h4><p>لوحة تحكم لحظية بتعطيك كل المعلومات اللي محتاجها</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="metrics-side">
+      <div class="metric-card"><div class="metric-label">توفير وقت الإدارة</div><div class="metric-value green">٧٠٪</div></div>
+      <div class="metric-card"><div class="metric-label">تقليل الأخطاء البشرية</div><div class="metric-value purple">٩٥٪</div></div>
+      <div class="metric-card"><div class="metric-label">سرعة إصدار الفاتورة</div><div class="metric-value orange">١٠x</div></div>
+      <div class="metric-card"><div class="metric-label">رضا العملاء</div><div class="metric-value pink">٩٨٪</div></div>
+      <div class="testimonial">
+        <div class="testimonial-stars">★★★★★</div>
+        <p>"النظام غيّر طريقة إدارتنا للشركة بالكامل. دلوقتي عارفين كل حاجة في الوقت الفعلي وبنقرر بناءً على بيانات صح"</p>
+        <div class="testimonial-author">— مدير مالي · شركة تجارية، القاهرة</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MODULES -->
+<section class="modules-section" id="modules">
+  <div class="section-header" style="text-align:center;margin-bottom:48px">
+    <div class="section-badge">١٩ وحدة · 19 Modules</div>
+    <h2 class="section-title">كل اللي شركتك محتاجاه</h2>
+    <p class="section-sub" style="margin:0 auto">من المبيعات للحسابات للموارد البشرية — نظام واحد يكفي</p>
+  </div>
+  <div class="modules-grid">
+    <div class="mod"><div class="mod-num">01</div><div class="mod-icon">📊</div><div class="mod-ar">لوحة التحكم</div><div class="mod-en">Dashboard</div><ul class="mod-features"><li>KPIs لحظية</li><li>تنبيهات ذكية</li><li>رسوم بيانية</li></ul></div>
+    <div class="mod"><div class="mod-num">02</div><div class="mod-icon">🛒</div><div class="mod-ar">إدارة المبيعات</div><div class="mod-en">Sales</div><ul class="mod-features"><li>فواتير بيع احترافية</li><li>نقدي وآجل وتقسيط</li><li>مرتجعات</li></ul></div>
+    <div class="mod"><div class="mod-num">03</div><div class="mod-icon">🧾</div><div class="mod-ar">الفاتورة الإلكترونية</div><div class="mod-en">E-Invoice ETA</div><ul class="mod-features"><li>إرسال مباشر للضرائب</li><li>تحميل PDF</li><li>متابعة الحالة</li></ul></div>
+    <div class="mod"><div class="mod-num">04</div><div class="mod-icon">🏪</div><div class="mod-ar">إدارة المخازن</div><div class="mod-en">Warehouse</div><ul class="mod-features"><li>عدة مخازن</li><li>تحويلات</li><li>جرد المخزون</li></ul></div>
+    <div class="mod"><div class="mod-num">05</div><div class="mod-icon">📦</div><div class="mod-ar">إدارة الأصناف</div><div class="mod-en">Products</div><ul class="mod-features"><li>أكواد ضريبية</li><li>أسعار متعددة</li><li>بطاقة صنف</li></ul></div>
+    <div class="mod"><div class="mod-num">06</div><div class="mod-icon">👤</div><div class="mod-ar">إدارة العملاء</div><div class="mod-en">Customers</div><ul class="mod-features"><li>ملف كامل</li><li>كشف حساب</li><li>متابعة مديونيات</li></ul></div>
+    <div class="mod"><div class="mod-num">07</div><div class="mod-icon">🚛</div><div class="mod-ar">إدارة الموردين</div><div class="mod-en">Suppliers</div><ul class="mod-features"><li>حسابات الموردين</li><li>متابعة مشتريات</li><li>كشف حساب</li></ul></div>
+    <div class="mod"><div class="mod-num">08</div><div class="mod-icon">📒</div><div class="mod-ar">الحسابات العامة</div><div class="mod-en">Accounting</div><ul class="mod-features"><li>شجرة حسابات</li><li>ميزان مراجعة</li><li>ميزانية عمومية</li></ul></div>
+    <div class="mod"><div class="mod-num">09</div><div class="mod-icon">📝</div><div class="mod-ar">القيود اليومية</div><div class="mod-en">Journal</div><ul class="mod-features"><li>قيود تلقائية</li><li>مراجعة وترحيل</li><li>تقارير مالية</li></ul></div>
+    <div class="mod"><div class="mod-num">10</div><div class="mod-icon">🖥️</div><div class="mod-ar">الكاشير POS</div><div class="mod-en">Point of Sale</div><ul class="mod-features"><li>بيع سريع</li><li>نقدي وفيزا ومحفظة</li><li>إغلاق يومي</li></ul></div>
+    <div class="mod"><div class="mod-num">11</div><div class="mod-icon">👥</div><div class="mod-ar">شؤون العاملين</div><div class="mod-en">HR</div><ul class="mod-features"><li>ملفات موظفين</li><li>بيانات تعيين</li><li>تقارير HR</li></ul></div>
+    <div class="mod"><div class="mod-num">12</div><div class="mod-icon">🔐</div><div class="mod-ar">الحضور والانصراف</div><div class="mod-en">Attendance</div><ul class="mod-features"><li>ربط بالبصمة</li><li>ساعات العمل</li><li>تقارير يومية</li></ul></div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing-section" id="pricing">
+  <div class="section-header" style="text-align:center;margin-bottom:48px">
+    <div class="section-badge">الأسعار · Pricing</div>
+    <h2 class="section-title">أسعار واضحة بدون مفاجآت</h2>
+    <p class="section-sub" style="margin:0 auto">ابدأ مجاناً ١٤ يوم — بدون كريدت كارد</p>
+  </div>
+  <div class="plans">
+    <div class="plan">
+      <div class="plan-name">الأساسية</div><div class="plan-name-en">Starter</div>
+      <div class="plan-price">٢٩٩ <span>ر.س/شهر</span></div>
+      <div class="plan-period">٣ مستخدمين</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>لوحة التحكم</li><li>المبيعات والفواتير</li><li>المخزن</li><li>٣ مستخدمين</li>
+        <li class="no">الفاتورة الإلكترونية</li><li class="no">الكاشير</li><li class="no">HR</li>
+      </ul>
+      <button class="plan-btn">ابدأ مجاناً</button>
+    </div>
+    <div class="plan featured">
+      <div class="plan-badge">⭐ الأكثر طلباً</div>
+      <div class="plan-name">الاحترافية</div><div class="plan-name-en">Professional</div>
+      <div class="plan-price">٦٩٩ <span>ر.س/شهر</span></div>
+      <div class="plan-period">١٠ مستخدمين</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>كل ميزات الأساسية</li><li>الفاتورة الإلكترونية ETA</li><li>الكاشير POS</li>
+        <li>شؤون العاملين</li><li>الحضور والانصراف</li><li>١٠ مستخدمين</li>
+        <li class="no">عدة فروع</li>
+      </ul>
+      <button class="plan-btn">ابدأ مجاناً</button>
+    </div>
+    <div class="plan">
+      <div class="plan-name">المؤسسية</div><div class="plan-name-en">Enterprise</div>
+      <div class="plan-price">١,٤٩٩ <span>ر.س/شهر</span></div>
+      <div class="plan-period">غير محدود</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>كل الميزات كاملة</li><li>عدة فروع وشركات</li><li>مستخدمين غير محدود</li>
+        <li>API كامل</li><li>دعم أولوية</li><li>تخصيص حسب الطلب</li><li>تدريب الفريق</li>
+      </ul>
+      <button class="plan-btn">تواصل معنا</button>
+    </div>
+  </div>
+</section>
+
+<!-- WHO -->
+<section class="who-section" id="who">
+  <div class="section-header" style="text-align:center;margin-bottom:48px">
+    <div class="section-badge">لمن النظام · Who Is It For</div>
+    <h2 class="section-title">مناسب لكل الأعمال</h2>
+    <p class="section-sub" style="margin:0 auto">صغير أو كبير — Orion ERP بيتكيف مع طبيعة شركتك</p>
+  </div>
+  <div class="who-grid">
+    <div class="who-card"><div class="who-icon">🛍️</div><div class="who-name">الشركات التجارية</div><div class="who-desc">بيع وشراء ومخازن في مكان واحد</div></div>
+    <div class="who-card"><div class="who-icon">🏭</div><div class="who-name">المصانع</div><div class="who-desc">خامات وإنتاج وتكلفة وحدة</div></div>
+    <div class="who-card"><div class="who-icon">🖥️</div><div class="who-name">الإلكترونيات</div><div class="who-desc">أكواد ضريبية وفاتورة إلكترونية</div></div>
+    <div class="who-card"><div class="who-icon">🚚</div><div class="who-name">التوزيع</div><div class="who-desc">عدة مخازن وفروع وتقارير</div></div>
+    <div class="who-card"><div class="who-icon">🔧</div><div class="who-name">الصيانة</div><div class="who-desc">طلبات وقطع غيار وتكلفة</div></div>
+    <div class="who-card"><div class="who-icon">🏗️</div><div class="who-name">المقاولات</div><div class="who-desc">مشاريع وتكاليف وموردين</div></div>
+    <div class="who-card"><div class="who-icon">🏢</div><div class="who-name">المؤسسات</div><div class="who-desc">موظفين وحضور ورواتب</div></div>
+    <div class="who-card"><div class="who-icon">🌿</div><div class="who-name">المعارض والمحلات</div><div class="who-desc">كاشير سريع ومخزون لحظي</div></div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="cta-orb"></div>
+  <div class="cta-box">
+    <div class="cta-badge">🎉 ١٤ يوم تجربة مجانية — بدون كريدت كارد</div>
+    <h2>جاهز تبدأ؟<br><span>النظام بينتظرك</span></h2>
+    <p>انضم للشركات اللي بتدير أعمالها بذكاء مع Orion ERP — وشوف الفرق بنفسك</p>
+    <div class="cta-btns">
+      <button class="btn-main">🚀 ابدأ مجاناً الآن</button>
+      <button class="btn-ghost">📞 تحدث مع فريقنا</button>
+    </div>
+    <div class="cta-note">✓ بدون بطاقة ائتمان &nbsp;&nbsp; ✓ تسطيب في ٥ دقائق &nbsp;&nbsp; ✓ دعم فني مجاني</div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-brand">Orion <span>ERP</span> · نظام أوريون</div>
+  <p>نظام إدارة متكامل للشركات المصرية والعربية · © ٢٠٢٦</p>
+  <div class="footer-links">
+    <a href="#">المميزات</a>
+    <a href="#">الأسعار</a>
+    <a href="#">الدعم</a>
+    <a href="#">تواصل معنا</a>
+  </div>
+</footer>
+
+</body>
+</html>

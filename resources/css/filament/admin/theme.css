@@ -1,0 +1,383 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/Admin/**/*';
+@source '../../../../resources/views/filament/admin/**/*';
+
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap');
+
+/* ══════════════════════════════════════
+   GLOBAL FONT
+══════════════════════════════════════ */
+* {
+    font-family: 'Cairo', sans-serif !important;
+}
+
+/* ══════════════════════════════════════
+   SIDEBAR
+══════════════════════════════════════ */
+
+/* الخلفية الرئيسية */
+aside.fi-sidebar,
+aside.fi-main-sidebar {
+    background-color: #0d1117 !important;
+    border-left: 1px solid #1e2d45 !important;
+    border-right: none !important;
+}
+
+/* Header / Brand */
+.fi-sidebar-header-ctn {
+    background-color: #0d1117 !important;
+    border-bottom: 1px solid #1e2d45 !important;
+    padding: 1rem 1.25rem !important;
+}
+
+/* Brand name */
+.fi-sidebar-header-ctn a {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    font-size: 1.2rem !important;
+    font-weight: 900 !important;
+    color: #e2e8f0 !important;
+    text-decoration: none !important;
+}
+
+/* نجمة بجانب الاسم */
+.fi-sidebar-header-ctn a::after {
+    content: '✦';
+    color: #8B5CF6;
+    font-size: 1rem;
+    margin-right: 2px;
+}
+
+/* Navigation scroll area */
+nav.fi-sidebar-nav {
+    background-color: #0d1117 !important;
+    padding: 8px 0 !important;
+}
+
+/* Group labels */
+.fi-sidebar-group > div:first-child,
+[data-group-label] {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    color: #334155 !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    padding: 10px 16px 4px !important;
+}
+
+/* Group collapse button */
+.fi-sidebar-group.fi-collapsible > button {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    color: #334155 !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    padding: 10px 16px 4px !important;
+    width: 100% !important;
+    text-align: right !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Items container */
+ul.fi-sidebar-nav-groups,
+ul.fi-sidebar-group-items {
+    list-style: none !important;
+    padding: 0 8px !important;
+    margin: 0 !important;
+}
+
+/* كل item */
+li.fi-sidebar-item {
+    margin-bottom: 2px !important;
+}
+
+/* الرابط نفسه */
+li.fi-sidebar-item a,
+li.fi-sidebar-item.fi-active a {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 8px 12px !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    text-decoration: none !important;
+    transition: all 0.15s ease !important;
+}
+
+li.fi-sidebar-item a:hover {
+    background-color: rgba(139, 92, 246, 0.08) !important;
+    color: #a78bfa !important;
+}
+
+li.fi-sidebar-item a:hover svg {
+    color: #8B5CF6 !important;
+}
+
+/* Active item */
+li.fi-sidebar-item.fi-active a {
+    background-color: #8B5CF6 !important;
+    color: #ffffff !important;
+}
+
+li.fi-sidebar-item.fi-active a * {
+    color: #ffffff !important;
+}
+
+li.fi-sidebar-item.fi-active a svg {
+    color: #ffffff !important;
+}
+
+/* Badge - على item عادي */
+li.fi-sidebar-item a .fi-badge,
+li.fi-sidebar-item a span[class*="badge"],
+.fi-sidebar-item-badge {
+    background-color: #8B5CF6 !important;
+    color: #fff !important;
+    font-size: 10px !important;
+    font-weight: 800 !important;
+    border-radius: 999px !important;
+    padding: 1px 7px !important;
+    margin-right: auto !important;
+}
+
+/* Badge - على active item تبقى بيضاء شفافة */
+li.fi-sidebar-item.fi-active a .fi-badge,
+li.fi-sidebar-item.fi-active a span[class*="badge"] {
+    background-color: rgba(255,255,255,0.25) !important;
+    color: #ffffff !important;
+}
+
+/* الأيقونات */
+li.fi-sidebar-item a svg {
+    color: #475569 !important;
+    width: 16px !important;
+    height: 16px !important;
+    flex-shrink: 0 !important;
+}
+
+/* ══════════════════════════════════════
+   TOP HEADER / NAVBAR
+══════════════════════════════════════ */
+
+header.fi-topbar,
+.fi-topbar {
+    background-color: #0d1117 !important;
+    border-bottom: 1px solid #1e2d45 !important;
+}
+
+header.fi-topbar nav,
+.fi-topbar nav {
+    background-color: #0d1117 !important;
+}
+
+/* Search bar */
+.fi-global-search-field input,
+input[type="search"] {
+    background-color: #161c2d !important;
+    border: 1px solid #1e2d45 !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+    font-size: 13px !important;
+}
+
+.fi-global-search-field input::placeholder {
+    color: #475569 !important;
+}
+
+/* Notification bell */
+.fi-notifications-open-btn,
+button[x-on\:click*="notification"] {
+    color: #64748b !important;
+}
+
+/* User avatar */
+.fi-user-avatar-ctn img,
+.fi-avatar {
+    border: 2px solid #8B5CF6 !important;
+    border-radius: 50% !important;
+}
+
+/* Avatar placeholder (حرف) */
+.fi-user-avatar-ctn span,
+.fi-avatar-placeholder {
+    background: linear-gradient(135deg, #8B5CF6, #6d28d9) !important;
+    color: #fff !important;
+    font-weight: 700 !important;
+    border: 2px solid #8B5CF6 !important;
+}
+
+/* ══════════════════════════════════════
+   MAIN CONTENT AREA
+══════════════════════════════════════ */
+
+.fi-main {
+    background-color: #0a0f1a !important;
+}
+
+.fi-page-header-heading {
+    font-size: 1.5rem !important;
+    font-weight: 900 !important;
+    color: #e2e8f0 !important;
+}
+
+/* ══════════════════════════════════════
+   TABLES
+══════════════════════════════════════ */
+
+.fi-ta-table {
+    background-color: #161c2d !important;
+    border: 1px solid #1e2d45 !important;
+    border-radius: 12px !important;
+}
+
+.fi-ta-header-cell {
+    background-color: #0d1117 !important;
+    color: #475569 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px !important;
+}
+
+.fi-ta-row:hover td {
+    background-color: rgba(139, 92, 246, 0.04) !important;
+}
+
+.fi-ta-cell {
+    border-color: #0f1723 !important;
+    color: #cbd5e1 !important;
+    font-size: 13px !important;
+}
+
+/* ══════════════════════════════════════
+   BUTTONS
+══════════════════════════════════════ */
+
+.fi-btn-color-primary {
+    background-color: #8B5CF6 !important;
+    border-color: #8B5CF6 !important;
+    color: #fff !important;
+}
+
+.fi-btn-color-primary:hover {
+    background-color: #7c3aed !important;
+    border-color: #7c3aed !important;
+}
+
+/* ══════════════════════════════════════
+   FORMS
+══════════════════════════════════════ */
+
+.fi-input {
+    background-color: #161c2d !important;
+    border-color: #1e2d45 !important;
+    color: #e2e8f0 !important;
+    border-radius: 8px !important;
+}
+
+.fi-input:focus {
+    border-color: #8B5CF6 !important;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
+}
+
+.fi-label {
+    color: #94a3b8 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+}
+
+/* ══════════════════════════════════════
+   CARDS / SECTIONS
+══════════════════════════════════════ */
+
+.fi-section {
+    background-color: #161c2d !important;
+    border: 1px solid #1e2d45 !important;
+    border-radius: 12px !important;
+}
+
+.fi-section-header {
+    border-bottom-color: #1e2d45 !important;
+}
+
+/* ══════════════════════════════════════
+   PAGINATION
+══════════════════════════════════════ */
+
+.fi-pagination-item-btn {
+    border-color: #1e2d45 !important;
+    color: #64748b !important;
+    background: transparent !important;
+}
+
+.fi-pagination-item-btn:hover {
+    border-color: #8B5CF6 !important;
+    color: #8B5CF6 !important;
+}
+
+.fi-pagination-item-btn[aria-current="page"] {
+    background-color: #8B5CF6 !important;
+    border-color: #8B5CF6 !important;
+    color: #fff !important;
+}
+
+/* ══════════════════════════════════════
+   DROPDOWN MENUS
+══════════════════════════════════════ */
+
+.fi-dropdown-panel {
+    background-color: #161c2d !important;
+    border: 1px solid #1e2d45 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+.fi-dropdown-item {
+    color: #94a3b8 !important;
+    font-size: 13px !important;
+}
+
+.fi-dropdown-item:hover {
+    background-color: rgba(139, 92, 246, 0.08) !important;
+    color: #a78bfa !important;
+}
+
+/* ══════════════════════════════════════
+   MODAL
+══════════════════════════════════════ */
+
+.fi-modal-content {
+    background-color: #161c2d !important;
+    border: 1px solid #1e2d45 !important;
+    border-radius: 16px !important;
+}
+
+.fi-modal-header {
+    border-bottom-color: #1e2d45 !important;
+}
+
+/* ══════════════════════════════════════
+   SCROLLBAR
+══════════════════════════════════════ */
+
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #1e2d45;
+    border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #8B5CF6;
+}
