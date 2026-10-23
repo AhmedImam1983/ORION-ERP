@@ -2,12 +2,22 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseOrder extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BranchScope());
+    }
+
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'order_number', 'supplier_id', 'warehouse_id', 'branch_id',
         'order_date', 'expected_date', 'status',
@@ -51,7 +61,7 @@ class PurchaseOrder extends Model
 
     public static function generateNumber(): string
     {
-        $last = static::latest()->first();
+        $last = static::withoutGlobalScopes()->latest()->first();
         $number = $last ? (intval(substr($last->order_number, -6)) + 1) : 1;
         return 'PO-' . str_pad($number, 6, '0', STR_PAD_LEFT);
     }

@@ -30,6 +30,52 @@ class InvoiceInventoryPostingService
             );
         }
 
+        $isOutgoing = in_array($invoice->type, ['sale', 'purchase_return'], true);
+        $isIncoming = in_array($invoice->type, ['purchase', 'sale_return'], true);
+
+        if (!$isOutgoing && !$isIncoming) {
+            throw new RuntimeException(
+                "نوع فاتورة غير مدعوم في حركة المخزون: {$invoice->type}"
+            );
+        }
+
+        $invoice->loadMissing('items.product');
+
+        if ($invoice->items->isEmpty()) {
+            throw new RuntimeException(
+                "لا يمكن ترحيل الفاتورة {$invoice->invoice_number} بدون أصناف."
+            );
+        }
+
+        // Validate references, then isolate stockable lines. Services are billed
+        // normally but never create WarehouseStock or StockMovement records.
+        $linkedItems = $invoice->items->filter(fn ($item) => (bool) $item->product_id)->values();
+        if ($linkedItems->isEmpty()) {
+            throw new RuntimeException(
+                "أصناف الفاتورة {$invoice->invoice_number} غير مرتبطة بمنتجات صالحة."
+            );
+        }
+
+        foreach ($linkedItems as $item) {
+            if (!$item->product) {
+                throw new RuntimeException(
+                    "تعذر العثور على الصنف المرتبط بسطر الفاتورة {$invoice->invoice_number}."
+                );
+            }
+
+            if ($item->product->isService() && in_array($invoice->type, ['purchase', 'purchase_return'], true)) {
+                throw new RuntimeException('لا يمكن ترحيل خدمة كشراء مخزني أو مرتجع شراء. استخدم مسار المصروفات المناسب للخدمات المشتراة.');
+            }
+        }
+
+        $stockItems = $linkedItems
+            ->filter(fn ($item) => $item->product_id && $item->product?->isStockItem())
+            ->values();
+
+        if ($stockItems->isEmpty()) {
+            return;
+        }
+
         if (!$invoice->warehouse_id) {
             throw new RuntimeException(
                 "لا يمكن ترحيل مخزون الفاتورة {$invoice->invoice_number} بدون مخزن محدد."
@@ -47,14 +93,6 @@ class InvoiceInventoryPostingService
             );
         }
 
-        $invoice->loadMissing('items');
-
-        if ($invoice->items->isEmpty()) {
-            throw new RuntimeException(
-                "لا يمكن ترحيل الفاتورة {$invoice->invoice_number} بدون أصناف."
-            );
-        }
-
         // Idempotency + historical safety: never duplicate or backfill partially.
         $alreadyPosted = StockMovement::query()
             ->where('invoice_id', $invoice->id)
@@ -65,19 +103,13 @@ class InvoiceInventoryPostingService
             return;
         }
 
-        $productIds = $invoice->items
+        $productIds = $stockItems
             ->pluck('product_id')
             ->filter()
             ->map(fn ($id) => (int) $id)
             ->unique()
             ->sort()
             ->values();
-
-        if ($productIds->isEmpty()) {
-            throw new RuntimeException(
-                "أصناف الفاتورة {$invoice->invoice_number} غير مرتبطة بمنتجات صالحة."
-            );
-        }
 
         // Product lock is the global per-product serialization lock used by all
         // warehouse-stock mutations in this patch.
@@ -94,15 +126,6 @@ class InvoiceInventoryPostingService
             );
         }
 
-        $isOutgoing = in_array($invoice->type, ['sale', 'purchase_return'], true);
-        $isIncoming = in_array($invoice->type, ['purchase', 'sale_return'], true);
-
-        if (!$isOutgoing && !$isIncoming) {
-            throw new RuntimeException(
-                "نوع فاتورة غير مدعوم في حركة المخزون: {$invoice->type}"
-            );
-        }
-
         $stocks = WarehouseStock::query()
             ->where('warehouse_id', $invoice->warehouse_id)
             ->whereIn('product_id', $productIds)
@@ -111,7 +134,7 @@ class InvoiceInventoryPostingService
             ->get()
             ->keyBy('product_id');
 
-        // Incoming operations may introduce an existing master product into a
+        // Incoming operations may introduce an existing stock product into a
         // second warehouse. Outgoing operations are never allowed to invent stock.
         if ($isIncoming) {
             foreach ($productIds as $productId) {
@@ -134,11 +157,7 @@ class InvoiceInventoryPostingService
                 ->keyBy('product_id');
         }
 
-        foreach ($invoice->items as $item) {
-            if (!$item->product_id) {
-                continue;
-            }
-
+        foreach ($stockItems as $item) {
             $product = $products->get((int) $item->product_id);
             $stock = $stocks->get((int) $item->product_id);
 
@@ -180,13 +199,10 @@ class InvoiceInventoryPostingService
                 $balanceAfter = round($balanceBefore + $quantity, 3);
             }
 
-            // Repeated product lines in one invoice see the previous line's updated
-            // warehouse balance because we mutate the same locked model instance.
             $stock->quantity = $balanceAfter;
             $stock->save();
 
-            // Compatibility total for legacy screens/readers. The warehouse table
-            // is the source of truth from this cutover forward.
+            // Compatibility total for legacy screens/readers.
             $product->quantity = round((float) WarehouseStock::query()
                 ->where('product_id', $product->id)
                 ->sum('quantity'), 3);

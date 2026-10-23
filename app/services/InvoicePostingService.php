@@ -232,9 +232,12 @@ class InvoicePostingService
 
     private function postCogs(Invoice $invoice): void
     {
+        $invoice->loadMissing('items.product');
         $totalCost = round(
             (float) $invoice->items->sum(
-                fn ($item) => (float) $item->quantity * (float) ($item->cost_price ?? 0)
+                fn ($item) => $item->product?->isService()
+                    ? 0
+                    : (float) $item->quantity * (float) ($item->cost_price ?? 0)
             ),
             2
         );
@@ -275,9 +278,12 @@ class InvoicePostingService
 
     private function postSaleReturnCost(Invoice $invoice): void
     {
+        $invoice->loadMissing('items.product');
         $totalCost = round(
             (float) $invoice->items->sum(
-                fn ($item) => (float) $item->quantity * (float) ($item->cost_price ?? 0)
+                fn ($item) => $item->product?->isService()
+                    ? 0
+                    : (float) $item->quantity * (float) ($item->cost_price ?? 0)
             ),
             2
         );

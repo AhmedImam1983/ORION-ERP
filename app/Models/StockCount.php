@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use App\Services\WarehouseInventoryService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +14,13 @@ use RuntimeException;
 
 class StockCount extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BranchScope());
+    }
+
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'count_number', 'type', 'status',
         'warehouse_id', 'branch_id', 'category_id',
@@ -34,7 +44,7 @@ class StockCount extends Model
 
     public static function generateNumber(): string
     {
-        $last = static::latest()->first();
+        $last = static::withoutGlobalScopes()->latest()->first();
         $num  = $last ? (intval(substr($last->count_number, -6)) + 1) : 1;
         return 'CNT-' . str_pad($num, 6, '0', STR_PAD_LEFT);
     }
@@ -53,6 +63,8 @@ class StockCount extends Model
             ->where('warehouse_id', $this->warehouse_id)
             ->whereHas('product', function ($q) {
                 $q->where('is_active', true);
+
+                $q->where('item_type', 'stock');
 
                 if ($this->category_id) {
                     $q->where('category_id', $this->category_id);
@@ -120,6 +132,10 @@ class StockCount extends Model
                     ->whereKey($item->product_id)
                     ->lockForUpdate()
                     ->firstOrFail();
+
+                if ($product->isService()) {
+                    throw new RuntimeException('الخدمات لا تدخل في الجرد المخزني.');
+                }
 
                 $stock = WarehouseStock::query()
                     ->where('product_id', $product->id)

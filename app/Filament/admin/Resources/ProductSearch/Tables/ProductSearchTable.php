@@ -59,15 +59,18 @@ class ProductSearchTable
                     ->badge()
                     ->color('primary')
                     ->placeholder('-'),
+                TextColumn::make('item_type')
+                    ->label('النوع')
+                    ->badge()
+                    ->formatStateUsing(fn ($state): string => $state === 'service' ? 'خدمة' : 'صنف مخزني')
+                    ->color(fn ($record): string => $record->isService() ? 'info' : 'success'),
 
                 TextColumn::make('quantity')
                     ->label('الرصيد')
-                    ->numeric(decimalPlaces: 3)
+                    ->formatStateUsing(fn ($state, $record): string => $record->isService() ? '—' : number_format((float) $state, 3))
                     ->sortable()
                     ->weight('bold')
-                    ->color(fn ($record) =>
-                        $record->quantity <= $record->min_quantity ? 'danger' : 'success'
-                    ),
+                    ->color(fn ($record) => $record->isService() ? 'gray' : ($record->quantity <= $record->min_quantity ? 'danger' : 'success')),
 
                 TextColumn::make('warehouse.name')
                     ->label('المخزن الافتراضي')

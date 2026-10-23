@@ -289,6 +289,7 @@ class ReportsPage extends Page
     public function loadStockReport(): void
     {
         $products = Product::with('category')
+            ->where('item_type', 'stock')
             ->where('is_active', true)
             ->orderBy('name')
             ->get();

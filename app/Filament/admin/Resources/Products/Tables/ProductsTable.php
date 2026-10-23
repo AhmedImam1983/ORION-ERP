@@ -34,9 +34,11 @@ class ProductsTable
                     'active' => $query->where('is_active', true),
                     'inactive' => $query->where('is_active', false),
                     'low_stock' => $query
+                        ->where('item_type', 'stock')
                         ->where('is_active', true)
                         ->whereColumn('quantity', '<=', 'min_quantity'),
                     'unassigned' => $query
+                        ->where('item_type', 'stock')
                         ->where('is_active', true)
                         ->whereDoesntHave('warehouseStocks'),
                     default => $query,
@@ -70,12 +72,18 @@ class ProductsTable
                     ->searchable()
                     ->badge()
                     ->color('primary'),
+                TextColumn::make('item_type')
+                    ->label('النوع')
+                    ->badge()
+                    ->formatStateUsing(fn ($state): string => $state === 'service' ? 'خدمة' : 'صنف مخزني')
+                    ->color(fn ($record): string => $record->isService() ? 'info' : 'success')
+                    ->sortable(),
                 TextColumn::make('warehouse.name')
                     ->label('المخزن الافتراضي')
                     ->searchable()
                     ->badge()
                     ->color('warning')
-                    ->default('غير محدد'),
+                    ->formatStateUsing(fn ($state, $record): string => $record->isService() ? '—' : ($state ?: 'غير محدد')),
                 TextColumn::make('automotive_location')
                     ->label('الموقع')
                     ->state(function ($record): string {
@@ -91,6 +99,7 @@ class ProductsTable
                 TextColumn::make('warehouse_stocks_count')
                     ->label('عدد المخازن')
                     ->counts('warehouseStocks')
+                    ->formatStateUsing(fn ($state, $record): string => $record->isService() ? '—' : (string) $state)
                     ->badge()
                     ->color('info')
                     ->sortable(),
@@ -99,13 +108,13 @@ class ProductsTable
                     ->searchable(),
                 TextColumn::make('quantity')
                     ->label('إجمالي الرصيد')
-                    ->numeric()
+                    ->formatStateUsing(fn ($state, $record): string => $record->isService() ? '—' : number_format((float) $state, 3))
                     ->sortable()
-                    ->color(fn($record) => $record->quantity <= $record->min_quantity ? 'danger' : 'success')
+                    ->color(fn($record) => $record->isService() ? 'gray' : ($record->quantity <= $record->min_quantity ? 'danger' : 'success'))
                     ->weight('bold'),
                 TextColumn::make('min_quantity')
                     ->label('الحد الأدنى')
-                    ->numeric()
+                    ->formatStateUsing(fn ($state, $record): string => $record->isService() ? '—' : number_format((float) $state, 3))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('cost_price')
@@ -131,6 +140,12 @@ class ProductsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                SelectFilter::make('item_type')
+                    ->label('نوع العنصر')
+                    ->options([
+                        'stock' => 'صنف مخزني',
+                        'service' => 'خدمة',
+                    ]),
                 SelectFilter::make('category_id')
                     ->label('المجموعة')
                     ->relationship('category', 'name'),

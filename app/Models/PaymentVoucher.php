@@ -2,11 +2,21 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PaymentVoucher extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BranchScope());
+    }
+
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'voucher_number',
         'payment_date',
@@ -77,7 +87,7 @@ class PaymentVoucher extends Model
     {
         $year = now()->format('Y');
 
-        $last = static::query()
+        $last = static::withoutGlobalScopes()
             ->where('voucher_number', 'like', "PAY-{$year}-%")
             ->orderByDesc('id')
             ->first();
@@ -90,7 +100,7 @@ class PaymentVoucher extends Model
 
         $candidate = 'PAY-' . $year . '-' . str_pad((string) $number, 6, '0', STR_PAD_LEFT);
 
-        while (static::query()->where('voucher_number', $candidate)->exists()) {
+        while (static::withoutGlobalScopes()->where('voucher_number', $candidate)->exists()) {
             $number++;
             $candidate = 'PAY-' . $year . '-' . str_pad((string) $number, 6, '0', STR_PAD_LEFT);
         }

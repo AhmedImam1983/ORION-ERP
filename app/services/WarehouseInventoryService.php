@@ -14,7 +14,18 @@ class WarehouseInventoryService
 {
     public function balance(Product|int $product, int $warehouseId): float
     {
-        $productId = $product instanceof Product ? $product->id : $product;
+        if ($product instanceof Product) {
+            if ($product->isService()) {
+                return 0.0;
+            }
+
+            $productId = $product->id;
+        } else {
+            $productId = $product;
+            if (Product::query()->whereKey($productId)->value('item_type') === 'service') {
+                return 0.0;
+            }
+        }
 
         return round((float) (WarehouseStock::query()
             ->where('product_id', $productId)
@@ -44,6 +55,10 @@ class WarehouseInventoryService
                 ->whereKey($productId)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if ($lockedProduct->isService()) {
+                throw new RuntimeException('الخدمات لا تحتوي على أرصدة مخزنية.');
+            }
 
             $warehouse = Warehouse::query()
                 ->whereKey($warehouseId)
@@ -107,6 +122,10 @@ class WarehouseInventoryService
                 ->whereKey($productId)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if ($lockedProduct->isService()) {
+                throw new RuntimeException('لا يمكن تحويل خدمة بين المخازن لأنها لا تُدار كمخزون.');
+            }
 
             $warehouses = Warehouse::query()
                 ->whereIn('id', [$fromWarehouseId, $toWarehouseId])

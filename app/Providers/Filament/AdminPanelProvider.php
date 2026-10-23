@@ -49,7 +49,8 @@ class AdminPanelProvider extends PanelProvider
             ->maxContentWidth('full')
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')
-            ->brandLogo(fn () => view('filament.brand'))
+            ->brandLogo(asset('images/orion-logo.png'))
+            ->favicon(asset('images/orion-logo.png'))
             ->sidebarWidth('18rem')
             ->navigationGroups([
                 NavigationGroup::make('المبيعات · Sales'),

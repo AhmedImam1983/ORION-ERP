@@ -27,10 +27,12 @@ class ListProducts extends ListRecords
             'active' => (clone $base)->where('is_active', true)->count(),
             'inactive' => (clone $base)->where('is_active', false)->count(),
             'low_stock' => (clone $base)
+                ->where('item_type', 'stock')
                 ->where('is_active', true)
                 ->whereColumn('quantity', '<=', 'min_quantity')
                 ->count(),
             'without_warehouse' => (clone $base)
+                ->where('item_type', 'stock')
                 ->where('is_active', true)
                 ->whereDoesntHave('warehouseStocks')
                 ->count(),

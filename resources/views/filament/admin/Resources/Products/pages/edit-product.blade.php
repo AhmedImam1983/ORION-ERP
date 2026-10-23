@@ -1,7 +1,8 @@
 <x-filament-panels::page>
     @php
         $record = $this->record;
-        $isLow = (float) ($record->quantity ?? 0) <= (float) ($record->min_quantity ?? 0);
+        $isService = $record->isService();
+        $isLow = !$isService && (float) ($record->quantity ?? 0) <= (float) ($record->min_quantity ?? 0);
         $margin = (float) ($record->sale_price ?? 0) - (float) ($record->cost_price ?? 0);
     @endphp
 
@@ -30,10 +31,19 @@
 
     <div class="orion-product-form">
         <div class="opf-metrics">
-            <div class="opf-metric" style="--accent:{{ $isLow ? 'var(--opf-red)' : 'var(--opf-green)' }}"><div class="opf-metric-label">الرصيد الحالي</div><div class="opf-metric-value">{{ number_format((float) $record->quantity, 2) }}</div><div class="opf-metric-note">{{ $record->unit ?: 'وحدة' }}</div></div>
-            <div class="opf-metric" style="--accent:var(--opf-amber)"><div class="opf-metric-label">الحد الأدنى</div><div class="opf-metric-value">{{ number_format((float) $record->min_quantity, 2) }}</div><div class="opf-metric-note">حد إعادة الطلب والتنبيه</div></div>
+            @if(!$isService)
+                <div class="opf-metric" style="--accent:{{ $isLow ? 'var(--opf-red)' : 'var(--opf-green)' }}"><div class="opf-metric-label">الرصيد الحالي</div><div class="opf-metric-value">{{ number_format((float) $record->quantity, 2) }}</div><div class="opf-metric-note">{{ $record->unit ?: 'وحدة' }}</div></div>
+                <div class="opf-metric" style="--accent:var(--opf-amber)"><div class="opf-metric-label">الحد الأدنى</div><div class="opf-metric-value">{{ number_format((float) $record->min_quantity, 2) }}</div><div class="opf-metric-note">حد إعادة الطلب والتنبيه</div></div>
+            @else
+                <div class="opf-metric" style="--accent:var(--opf-blue)"><div class="opf-metric-label">نوع العنصر</div><div class="opf-metric-value">خدمة</div><div class="opf-metric-note">لا تُدار كمخزون</div></div>
+                <div class="opf-metric" style="--accent:var(--opf-green)"><div class="opf-metric-label">المخزون</div><div class="opf-metric-value">غير مخزني</div><div class="opf-metric-note">لا تنشأ حركات مخزون</div></div>
+            @endif
             <div class="opf-metric" style="--accent:var(--opf-blue)"><div class="opf-metric-label">سعر البيع</div><div class="opf-metric-value">{{ number_format((float) $record->sale_price, 2) }} ر.س</div><div class="opf-metric-note">السعر الرئيسي الحالي</div></div>
-            <div class="opf-metric" style="--accent:{{ $margin >= 0 ? 'var(--opf-purple)' : 'var(--opf-red)' }}"><div class="opf-metric-label">هامش السعر</div><div class="opf-metric-value">{{ number_format($margin, 2) }} ر.س</div><div class="opf-metric-note">سعر البيع ناقص التكلفة</div></div>
+            @if(!$isService)
+                <div class="opf-metric" style="--accent:{{ $margin >= 0 ? 'var(--opf-purple)' : 'var(--opf-red)' }}"><div class="opf-metric-label">هامش السعر</div><div class="opf-metric-value">{{ number_format($margin, 2) }} ر.س</div><div class="opf-metric-note">سعر البيع ناقص التكلفة</div></div>
+            @else
+                <div class="opf-metric" style="--accent:var(--opf-purple)"><div class="opf-metric-label">المجموعة</div><div class="opf-metric-value" style="font-size:14px">{{ $record->category?->name ?? 'الخدمات' }}</div><div class="opf-metric-note">تصنيف الخدمة</div></div>
+            @endif
         </div>
 
         <div class="opf-layout">
@@ -53,16 +63,18 @@
                     <div class="opf-side-kicker">PRODUCT SNAPSHOT</div>
                     <div class="opf-side-title">{{ $record->name }}</div>
                     <div class="opf-side-sub">{{ $record->name_en ?: $record->code }}</div>
-                    <div class="opf-side-balance">{{ number_format((float) $record->quantity, 2) }}</div>
-                    <div class="opf-side-label">الرصيد الحالي · {{ $record->unit }}</div>
+                    <div class="opf-side-balance">{{ $isService ? 'خدمة' : number_format((float) $record->quantity, 2) }}</div>
+                    <div class="opf-side-label">{{ $isService ? 'لا يوجد رصيد مخزني' : 'الرصيد الحالي · ' . $record->unit }}</div>
                     <div class="opf-side-rows">
                         <div class="opf-row"><span>المجموعة</span><strong>{{ $record->category?->name ?? 'غير محددة' }}</strong></div>
-                        <div class="opf-row"><span>المخزن</span><strong>{{ $record->warehouse?->name ?? 'غير محدد' }}</strong></div>
-                        <div class="opf-row"><span>التكلفة</span><strong>{{ number_format((float) $record->cost_price, 2) }} ر.س</strong></div>
+                        <div class="opf-row"><span>المخزن</span><strong>{{ $isService ? 'غير مطلوب' : ($record->warehouse?->name ?? 'غير محدد') }}</strong></div>
+                        @if(!$isService)
+                            <div class="opf-row"><span>التكلفة</span><strong>{{ number_format((float) $record->cost_price, 2) }} ر.س</strong></div>
+                        @endif
                         <div class="opf-row"><span>الحالة</span><strong class="opf-state">{{ $record->is_active ? 'نشط' : 'غير نشط' }}</strong></div>
                     </div>
                 </div>
-                @if(!$record->warehouse_id || $isLow)
+                @if(!$isService && (!$record->warehouse_id || $isLow))
                     <div class="opf-side-card opf-warning">
                         <strong>تنبيه تشغيلي</strong>
                         <p>

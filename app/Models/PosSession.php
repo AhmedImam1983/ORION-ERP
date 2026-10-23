@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PosSession extends Model
 {
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'session_number', 'user_id', 'branch_id', 'warehouse_id',
         'treasury_id', 'bank_account_id', 'register_name',

@@ -77,6 +77,7 @@ class PartsSearch extends Page
             ->when($this->brandId, fn ($q) => $q->where('brand_id', $this->brandId))
             ->when($this->categoryId, fn ($q) => $q->where('category_id', $this->categoryId))
             ->where('is_active', true)
+            ->where('item_type', 'stock')
             ->latest('id')
             ->limit(36)
             ->get();
@@ -131,7 +132,7 @@ class PartsSearch extends Page
     {
         $product = Product::query()->find($productId);
 
-        if (!$product) {
+        if (!$product || !$product->isStockItem()) {
             return;
         }
 

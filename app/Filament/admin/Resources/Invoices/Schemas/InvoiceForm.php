@@ -115,9 +115,23 @@ class InvoiceForm
 
                                         $query = Product::query()->where('is_active', true);
 
-                                        if ($warehouseId && in_array($type, ['sale', 'purchase_return'], true)) {
-                                            $query->whereHas('warehouseStocks', function ($q) use ($warehouseId) {
-                                                $q->where('warehouse_id', $warehouseId)
+                                        // Service items are valid on sales and sales returns, but
+                                        // are not inventory purchases in this initial workflow.
+                                        if (in_array($type, ['purchase', 'purchase_return'], true)) {
+                                            $query->where('item_type', 'stock');
+                                        }
+
+                                        if ($warehouseId && $type === 'sale') {
+                                            $query->where(function ($items) use ($warehouseId) {
+                                                $items->where('item_type', 'service')
+                                                    ->orWhereHas('warehouseStocks', function ($stock) use ($warehouseId) {
+                                                        $stock->where('warehouse_id', $warehouseId)
+                                                            ->where('quantity', '>', 0);
+                                                    });
+                                            });
+                                        } elseif ($warehouseId && $type === 'purchase_return') {
+                                            $query->whereHas('warehouseStocks', function ($stock) use ($warehouseId) {
+                                                $stock->where('warehouse_id', $warehouseId)
                                                     ->where('quantity', '>', 0);
                                             });
                                         }

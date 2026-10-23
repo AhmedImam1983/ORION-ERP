@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Expense extends Model
 {
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'expense_category_id', 'branch_id', 'amount',
         'description', 'expense_date', 'created_by', 'journal_entry_id',

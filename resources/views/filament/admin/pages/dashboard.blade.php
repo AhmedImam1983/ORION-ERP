@@ -193,9 +193,9 @@
 <div class="orion-command">
     <div class="oc-head">
         <div>
-            <div class="oc-kicker">{{ $isCashier ? 'ORION POS OPERATIONS' : 'ORION EXECUTIVE COMMAND CENTER' }}</div>
-            <div class="oc-title">{{ $isCashier ? 'لوحة تشغيل الكاشير' : 'مركز القيادة' }}</div>
-            <div class="oc-subtitle">{{ $isCashier ? 'متابعة الجلسة والمبيعات والتحصيل للمستخدم الحالي' : 'نظرة تنفيذية شاملة على الأداء المالي والتشغيلي اليوم' }}</div>
+            <div class="oc-kicker">{{ $isCashier ? 'ORION POS OPERATIONS' : ($isBranchUser ? 'ORION BRANCH OPERATIONS' : 'ORION EXECUTIVE COMMAND CENTER') }}</div>
+            <div class="oc-title">{{ $isCashier ? 'لوحة تشغيل الكاشير' : ($isBranchUser ? 'لوحة الفرع' : 'مركز القيادة') }}</div>
+            <div class="oc-subtitle">{{ $isCashier ? 'متابعة الجلسة والمبيعات والتحصيل للمستخدم الحالي' : ($isBranchUser ? 'ملخص المبيعات والمستحقات داخل نطاق فرعك' : 'نظرة تنفيذية شاملة على الأداء المالي والتشغيلي اليوم') }}</div>
         </div>
         <div class="oc-head-right">
             <div class="oc-health"><span class="oc-health-dot"></span> النظام يعمل</div>
@@ -203,7 +203,7 @@
                 <svg class="oc-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
                 {{ now()->locale('ar')->isoFormat('dddd، D MMMM YYYY') }}
             </div>
-            @if(!$isCashier)
+            @if(!$isCashier && !$isBranchUser)
                 <a href="{{ route('filament.admin.resources.invoices.create') }}" class="oc-head-btn">
                     <svg class="oc-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
                     فاتورة جديدة
@@ -301,6 +301,34 @@
                     @endforelse
                 </div>
             </div>
+        </div>
+
+    @elseif($isBranchUser)
+        <div class="oc-kpis">
+            <div class="oc-kpi green">
+                <div class="oc-kpi-top"><div><div class="oc-kpi-label">مبيعات اليوم داخل فرعك</div></div></div>
+                <div class="oc-kpi-value oc-green">{{ number_format($totalSalesToday,2) }} <span class="oc-kpi-currency">ر.س</span></div>
+            </div>
+            <div class="oc-kpi blue">
+                <div class="oc-kpi-top"><div><div class="oc-kpi-label">التحصيل اليوم داخل فرعك</div></div></div>
+                <div class="oc-kpi-value oc-blue">{{ number_format($collectedToday,2) }} <span class="oc-kpi-currency">ر.س</span></div>
+            </div>
+            <div class="oc-kpi purple">
+                <div class="oc-kpi-top"><div><div class="oc-kpi-label">فواتير البيع في نطاق فرعك</div></div></div>
+                <div class="oc-kpi-value oc-purple">{{ number_format($totalInvoices) }}</div>
+            </div>
+            <div class="oc-kpi amber">
+                <div class="oc-kpi-top"><div><div class="oc-kpi-label">مستحقات العملاء في فرعك</div></div></div>
+                <div class="oc-kpi-value oc-amber">{{ number_format($totalDebts,2) }} <span class="oc-kpi-currency">ر.س</span></div>
+                <div class="oc-trend neutral">{{ number_format($unpaidCount) }} فاتورة غير مسددة بالكامل</div>
+            </div>
+        </div>
+        <div class="oc-card" style="margin-top:16px;padding:20px;">
+            <div class="oc-section-title">نطاق البيانات</div>
+            <div class="oc-section-sub">هذه اللوحة تعرض ملخص الفواتير المرتبطة بفرع حسابك فقط. تقارير الأرباح والخسائر والميزانية الحالية تعتمد على قيود محاسبية غير مرتبطة مباشرة بفرع في قاعدة البيانات، لذلك لا نعرضها في هذه اللوحة المحدودة.</div>
+            @if(auth()->user()?->can('view_invoices'))
+                <div style="margin-top:14px;"><a class="oc-panel-link" href="{{ route('filament.admin.resources.invoices.index') }}">عرض فواتير الفرع المسموح بها</a></div>
+            @endif
         </div>
 
     @else
@@ -478,7 +506,7 @@
     @endif
 </div>
 
-@if(!$isCashier)
+@if(!$isCashier && !$isBranchUser)
 <script>
 (function(){
     const el = document.querySelector('#orion-executive-sales-chart');
