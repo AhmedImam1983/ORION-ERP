@@ -59,7 +59,8 @@ class StockMovementResource extends Resource
 
     public static function canCreate(): bool
     {
-        return true;
+        return auth()->user()?->hasAnyRole(['super_admin', 'admin', 'storekeeper'])
+            || auth()->user()?->can('create_stock_movements') === true;
     }
 
     public static function getNavigationBadge(): ?string

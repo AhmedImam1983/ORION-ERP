@@ -2,8 +2,6 @@
 
 namespace App\Filament\Admin\Resources\StockMovements\Tables;
 
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -134,12 +132,8 @@ class StockMovementsTable
                     ->label('المخزن')
                     ->relationship('warehouse', 'name'),
             ])
+            // Stock movements are an audit ledger; no destructive bulk actions.
             ->recordActions([])
-            ->toolbarActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make()->label('حذف المحدد'),
-                ]),
-            ])
             ->defaultSort('created_at', 'desc')
             ->emptyStateHeading('لا توجد حركات مخزون بعد')
             ->emptyStateDescription('ستظهر الحركات تلقائياً عند تأكيد الفواتير أو عند تسجيل تسوية يدوية')

@@ -24,7 +24,8 @@ class SendDailyAlerts extends Command
         }
 
         // ===== تنبيهات المخزون الناقص =====
-        $lowStock = Product::where('is_active', true)
+        $lowStock = Product::where('item_type', 'stock')
+            ->where('is_active', true)
             ->where('min_quantity', '>', 0)
             ->whereRaw('COALESCE(quantity, 0) <= min_quantity')
             ->get();

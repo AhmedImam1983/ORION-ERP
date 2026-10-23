@@ -74,6 +74,21 @@ class EditInvoice extends EditRecord
 
         $items = $data['items'] ?? [];
 
+        if (in_array($type, ['purchase', 'purchase_return'], true)) {
+            foreach ($items as $item) {
+                if (empty($item['product_id'])) {
+                    continue;
+                }
+
+                $product = Product::query()->find($item['product_id']);
+                if ($product?->isService()) {
+                    throw ValidationException::withMessages([
+                        'items' => 'الخدمات لا تُسجل كشراء مخزني. استخدم صنفاً مخزنياً؛ ويمكن تسجيل تكلفة الخدمات المشتراة من مسار المصروفات المناسب.',
+                    ]);
+                }
+            }
+        }
+
         $invoiceSubtotal = 0;
         $invoiceTax = 0;
         $invoiceDiscount = 0;

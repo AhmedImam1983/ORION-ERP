@@ -21,10 +21,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->unique([
-                'warehouse_stock_id',
-                'location_code',
-            ]);
+            $table->unique(['warehouse_stock_id', 'location_code'], 'wsl_stock_loc_code_unique');
         });
     }
 

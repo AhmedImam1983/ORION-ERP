@@ -4,9 +4,21 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Validation\ValidationException;
 
 class PurchaseOrderItem extends Model
 {
+    protected static function booted(): void
+    {
+        static::saving(function (PurchaseOrderItem $item): void {
+            if ($item->product_id && Product::query()->whereKey($item->product_id)->where('item_type', 'service')->exists()) {
+                throw ValidationException::withMessages([
+                    'items' => 'أوامر الشراء المخزنية تقبل الأصناف المخزنية فقط؛ الخدمة المشتراة تُسجل كمصروف.',
+                ]);
+            }
+        });
+    }
+
     protected $fillable = [
         'purchase_order_id', 'product_id', 'product_name', 'product_code',
         'unit', 'quantity', 'received_quantity', 'unit_price', 'total', 'notes',

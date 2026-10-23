@@ -32,6 +32,11 @@ class ProductInfolist
                 TextEntry::make('name_en')
                     ->label('الاسم بالإنجليزي')
                     ->placeholder('-'),
+                TextEntry::make('item_type')
+                    ->label('نوع العنصر')
+                    ->formatStateUsing(fn ($state): string => $state === 'service' ? 'خدمة' : 'صنف مخزني')
+                    ->badge()
+                    ->color(fn (Product $record): string => $record->isService() ? 'info' : 'success'),
                 TextEntry::make('brand.name')
                     ->label('العلامة التجارية')
                     ->badge()
@@ -50,7 +55,8 @@ class ProductInfolist
                     ->label('المخزن الافتراضي')
                     ->badge()
                     ->color('warning')
-                    ->placeholder('-'),
+                    ->placeholder('-')
+                    ->visible(fn (Product $record): bool => !$record->isService()),
                 TextEntry::make('unit')
                     ->label('وحدة القياس'),
                 TextEntry::make('barcode')
@@ -67,7 +73,8 @@ class ProductInfolist
                 TextEntry::make('cost_price')
                     ->label('سعر التكلفة')
                     ->money('SAR')
-                    ->color('danger'),
+                    ->color('danger')
+                    ->visible(fn (Product $record): bool => !$record->isService()),
                 TextEntry::make('sale_price')
                     ->label('سعر البيع')
                     ->money('SAR')
@@ -85,14 +92,17 @@ class ProductInfolist
                     ->label('إجمالي الرصيد')
                     ->weight('bold')
                     ->color(fn ($record) => $record->quantity <= $record->min_quantity ? 'danger' : 'success')
-                    ->formatStateUsing(fn ($state, Product $record): string => self::formatQuantity($state) . ' ' . $record->unit),
+                    ->formatStateUsing(fn ($state, Product $record): string => self::formatQuantity($state) . ' ' . $record->unit)
+                    ->visible(fn (Product $record): bool => !$record->isService()),
                 TextEntry::make('min_quantity')
                     ->label('الحد الأدنى')
                     ->color('warning')
-                    ->formatStateUsing(fn ($state, Product $record): string => self::formatQuantity($state) . ' ' . $record->unit),
+                    ->formatStateUsing(fn ($state, Product $record): string => self::formatQuantity($state) . ' ' . $record->unit)
+                    ->visible(fn (Product $record): bool => !$record->isService()),
             ])->columns(3),
 
             Section::make('أرصدة المخازن')
+                ->visible(fn (Product $record): bool => !$record->isService())
                 ->description('الرصيد الفعلي للصنف داخل كل مخزن')
                 ->icon('heroicon-o-building-storefront')
                 ->schema([
@@ -134,6 +144,7 @@ class ProductInfolist
                 ]),
 
             Section::make('مواقع المخزون')
+                ->visible(fn (Product $record): bool => !$record->isService())
                 ->schema([
                     TextEntry::make('locations_list')
                         ->label('المواقع')

@@ -99,7 +99,9 @@ class TreasuriesPage extends Page
 
     public function getTodaySummary(): array
     {
-        $transactions = TreasuryTransaction::whereDate('created_at', today())->get();
+        $visibleTreasuryIds = Treasury::query()->pluck('id');
+        $transactions = TreasuryTransaction::whereIn('treasury_id', $visibleTreasuryIds)
+            ->whereDate('created_at', today())->get();
 
         $incoming = (float) $transactions
             ->filter(fn ($tx) => in_array($tx->type, ['in', 'transfer_in'], true))
@@ -119,7 +121,9 @@ class TreasuriesPage extends Page
 
     public function getTodayStatsByTreasury(): array
     {
-        $rows = TreasuryTransaction::whereDate('created_at', today())->get();
+        $visibleTreasuryIds = Treasury::query()->pluck('id');
+        $rows = TreasuryTransaction::whereIn('treasury_id', $visibleTreasuryIds)
+            ->whereDate('created_at', today())->get();
         $stats = [];
 
         foreach ($rows as $tx) {
@@ -147,6 +151,11 @@ class TreasuriesPage extends Page
             return collect();
         }
 
+        // selectedTreasuryId is a public Livewire property; re-check visibility server-side.
+        if (!Treasury::query()->whereKey($this->selectedTreasuryId)->exists()) {
+            return collect();
+        }
+
         return TreasuryTransaction::with('createdBy', 'fromTreasury', 'toTreasury')
             ->where('treasury_id', $this->selectedTreasuryId)
             ->orderByDesc('created_at')
@@ -156,6 +165,11 @@ class TreasuriesPage extends Page
 
     public function selectTreasury(int $id): void
     {
+        if (!Treasury::query()->whereKey($id)->exists()) {
+            Notification::make()->title('الخزينة غير متاحة لحسابك.')->danger()->send();
+            return;
+        }
+
         $this->selectedTreasuryId = $id;
     }
 

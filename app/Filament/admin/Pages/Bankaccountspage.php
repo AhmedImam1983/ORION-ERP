@@ -51,6 +51,7 @@ class BankAccountsPage extends Page
     public function getTransactions()
     {
         if (!$this->viewTxBankId) return collect();
+        if (!BankAccount::query()->whereKey($this->viewTxBankId)->exists()) return collect();
         return BankTransaction::with('createdBy', 'fromAccount', 'toAccount')
             ->where('bank_account_id', $this->viewTxBankId)
             ->orderByDesc('created_at')
@@ -82,6 +83,11 @@ class BankAccountsPage extends Page
 
     public function openTransfer(int $id): void
     {
+        if (!BankAccount::query()->whereKey($id)->exists()) {
+            Notification::make()->title('الحساب البنكي غير متاح لحسابك.')->danger()->send();
+            return;
+        }
+
         $this->selectedBankId = $id;
         $this->txAmount = 0;
         $this->txDesc = '';
@@ -158,6 +164,11 @@ class BankAccountsPage extends Page
 
     public function toggleTransactions(int $id): void
     {
+        if (!BankAccount::query()->whereKey($id)->exists()) {
+            Notification::make()->title('الحساب البنكي غير متاح لحسابك.')->danger()->send();
+            return;
+        }
+
         $this->viewTxBankId = $this->viewTxBankId === $id ? null : $id;
     }
 }

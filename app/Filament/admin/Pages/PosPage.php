@@ -36,8 +36,243 @@ class PosPage extends Page
         return 'المبيعات · Sales';
     }
 
+    /**
+     * POS is an operational page: only cashiers and administrators may use it.
+     * Branch-bound users must have a branch assignment; administrators may work
+     * across branches, but their POS session is still owned by their own user id.
+     */
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        if (!$user || !$user->hasAnyRole(['super_admin', 'admin', 'cashier'])) {
+            return false;
+        }
+
+        return $user->hasAnyRole(['super_admin', 'admin']) || !empty($user->branch_id);
+    }
+
+    private function isPosAdmin(): bool
+    {
+        return (bool) auth()->user()?->hasAnyRole(['super_admin', 'admin']);
+    }
+
+    /** Resolve the only default warehouse a branch-bound POS user may use. */
+    private function defaultWarehouseIdForBranch(Branch $branch): ?int
+    {
+        if ($branch->warehouse_id) {
+            return (int) $branch->warehouse_id;
+        }
+
+        // Compatibility for the legacy main branch only. Other branches must
+        // have an explicit warehouse mapping before a cashier can use them.
+        if ($branch->is_main) {
+            $warehouseId = Warehouse::query()
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->orderBy('id')
+                ->value('id');
+
+            return $warehouseId ? (int) $warehouseId : null;
+        }
+
+        return null;
+    }
+
+    private function assertPosAccess(): void
+    {
+        $user = auth()->user();
+
+        if (!$user || !$user->hasAnyRole(['super_admin', 'admin', 'cashier'])) {
+            throw new RuntimeException('ليس لديك صلاحية استخدام نقطة البيع.');
+        }
+
+        if (!$this->isPosAdmin() && empty($user->branch_id)) {
+            throw new RuntimeException('حسابك غير مرتبط بفرع. اطلب من المدير تعيين فرع لحسابك.');
+        }
+    }
+
+    private function authorizedBranch(int $branchId): Branch
+    {
+        $this->assertPosAccess();
+
+        if ($branchId <= 0) {
+            throw new RuntimeException('اختر فرعًا صالحًا أولاً.');
+        }
+
+        $user = auth()->user();
+        if (!$this->isPosAdmin() && (int) $user->branch_id !== $branchId) {
+            throw new RuntimeException('لا يمكنك فتح جلسة على فرع غير الفرع المعيّن لحسابك.');
+        }
+
+        $branch = Branch::query()
+            ->whereKey($branchId)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$branch) {
+            throw new RuntimeException('الفرع المحدد غير موجود أو غير نشط.');
+        }
+
+        return $branch;
+    }
+
+    private function authorizedWarehouse(Branch $branch, int $warehouseId): Warehouse
+    {
+        $warehouse = Warehouse::query()
+            ->whereKey($warehouseId)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$warehouse) {
+            throw new RuntimeException('المخزن المحدد غير موجود أو غير نشط.');
+        }
+
+        // The schema stores a default warehouse on each branch, but no branch_id
+        // on warehouses. Non-admins may use that mapped warehouse, or the shared
+        // active default warehouse when the branch has no warehouse mapping.
+        if (!$this->isPosAdmin()) {
+            $allowedWarehouseId = $this->defaultWarehouseIdForBranch($branch);
+
+            if (!$allowedWarehouseId) {
+                throw new RuntimeException('اربط هذا الفرع بمخزن افتراضي من إعدادات الفروع قبل فتح جلسة الكاشير.');
+            }
+
+            if ((int) $allowedWarehouseId !== $warehouseId) {
+                throw new RuntimeException('المخزن المحدد غير مسموح به لفرعك.');
+            }
+        }
+
+        return $warehouse;
+    }
+
+    private function authorizedTreasury(int $treasuryId, Branch $branch): Treasury
+    {
+        $treasury = Treasury::query()
+            ->whereKey($treasuryId)
+            ->where('is_active', true)
+            ->where(function ($query) use ($branch) {
+                $query->whereNull('branch_id')->orWhere('branch_id', $branch->id);
+            })
+            ->first();
+
+        if (!$treasury) {
+            throw new RuntimeException('الخزينة غير نشطة أو غير تابعة للفرع المحدد.');
+        }
+
+        return $treasury;
+    }
+
+    private function authorizedBankAccount(int $bankAccountId, Branch $branch): BankAccount
+    {
+        $bankAccount = BankAccount::query()
+            ->whereKey($bankAccountId)
+            ->where('is_active', true)
+            ->where(function ($query) use ($branch) {
+                $query->whereNull('branch_id')->orWhere('branch_id', $branch->id);
+            })
+            ->first();
+
+        if (!$bankAccount) {
+            throw new RuntimeException('الحساب البنكي غير نشط أو غير تابع للفرع المحدد.');
+        }
+
+        return $bankAccount;
+    }
+
+    /**
+     * Re-fetch the active POS session from the database on every sensitive
+     * Livewire action. Never trust a client-hydrated model id without checking
+     * ownership, status, and branch authorization.
+     */
+    private function authorizedCurrentSession(bool $lockForUpdate = false, bool $validateOperationalLinks = false, bool $validateWarehouse = true): PosSession
+    {
+        $this->assertPosAccess();
+        $sessionId = (int) ($this->currentSession?->getKey() ?? 0);
+
+        if ($sessionId <= 0) {
+            throw new RuntimeException('لا توجد جلسة كاشير مفتوحة لحسابك.');
+        }
+
+        $query = PosSession::withoutGlobalScopes()
+            ->whereKey($sessionId)
+            ->where('user_id', auth()->id())
+            ->where('status', 'open');
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        $session = $query->first();
+        if (!$session) {
+            throw new RuntimeException('جلسة الكاشير غير موجودة أو لا تخص حسابك أو تم إغلاقها.');
+        }
+
+        $branch = $this->authorizedBranch((int) $session->branch_id);
+
+        if ($validateWarehouse) {
+            $this->authorizedWarehouse($branch, (int) $session->warehouse_id);
+        }
+
+        if ($validateOperationalLinks) {
+            $this->authorizedTreasury((int) $session->treasury_id, $branch);
+
+            if ($session->bank_account_id) {
+                $this->authorizedBankAccount((int) $session->bank_account_id, $branch);
+            }
+        }
+
+        // Keep the server-side model synchronized with the database record.
+        $this->currentSession = $session;
+
+        return $session;
+    }
+
+    /** Warehouses shown to a non-admin are restricted to their branch default. */
+    public function getAvailableWarehouses()
+    {
+        if (!auth()->check()) {
+            return collect();
+        }
+
+        if ($this->isPosAdmin()) {
+            return Warehouse::query()
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get();
+        }
+
+        $user = auth()->user();
+        if (empty($user->branch_id)) {
+            return collect();
+        }
+
+        $branch = Branch::query()
+            ->whereKey($user->branch_id)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$branch) {
+            return collect();
+        }
+
+        $warehouseId = $this->defaultWarehouseIdForBranch($branch);
+        if (!$warehouseId) {
+            return collect();
+        }
+
+        $warehouse = Warehouse::query()
+            ->whereKey($warehouseId)
+            ->where('is_active', true)
+            ->first();
+
+        return $warehouse ? collect([$warehouse]) : collect();
+    }
+
     public ?PosSession $currentSession = null;
     public bool $showOpenSession = false;
+    public bool $showCloseSessionConfirmation = false;
     public float $openingCash = 0;
     public ?int $selectedBranchId = null;
     public ?int $selectedWarehouseId = null;
@@ -91,30 +326,59 @@ class PosPage extends Page
     public function updatedSelectedBranchId($value): void
     {
         $this->selectedBranchId = $value ? (int) $value : null;
+
+        if ($this->selectedBranchId) {
+            try {
+                $this->authorizedBranch($this->selectedBranchId);
+            } catch (RuntimeException $e) {
+                $this->selectedBranchId = $this->isPosAdmin()
+                    ? Branch::getMain()?->id
+                    : (auth()->user()?->branch_id ? (int) auth()->user()->branch_id : null);
+
+                Notification::make()->title($e->getMessage())->danger()->send();
+            }
+        } elseif (!$this->isPosAdmin()) {
+            $this->selectedBranchId = auth()->user()?->branch_id
+                ? (int) auth()->user()->branch_id
+                : null;
+        }
+
         $this->applyBranchDefaults();
     }
 
     private function applyBranchDefaults(): void
     {
         $branchId = $this->selectedBranchId;
+        $branch = null;
 
-        // Warehouses are not branch-scoped in the current schema.
-        // Prefer the warehouse explicitly linked to the branch; otherwise use
-        // the active default warehouse without querying a non-existent branch_id.
-        $this->selectedWarehouseId = $branchId
-            ? (Branch::find($branchId)?->warehouse_id
-                ?? Warehouse::where('is_active', true)
+        if ($branchId) {
+            try {
+                $branch = $this->authorizedBranch((int) $branchId);
+            } catch (RuntimeException) {
+                $branch = null;
+                $this->selectedBranchId = null;
+            }
+        }
+
+        $branchId = $branch?->id;
+
+        // For non-admin users, only their branch default (or the shared active
+        // default when no branch warehouse is configured) is selectable.
+        $this->selectedWarehouseId = $branch
+            ? $this->defaultWarehouseIdForBranch($branch)
+            : ($this->isPosAdmin()
+                ? Warehouse::where('is_active', true)
                     ->orderByDesc('is_default')
-                    ->value('id'))
-            : Warehouse::where('is_active', true)
-                ->orderByDesc('is_default')
-                ->value('id');
+                    ->orderBy('id')
+                    ->value('id')
+                : null);
 
         $this->selectedTreasuryId = Treasury::where('is_active', true)
             ->when($branchId, fn ($q) => $q->where(function ($qq) use ($branchId) {
                 $qq->where('branch_id', $branchId)->orWhereNull('branch_id');
             }))
             ->orderByDesc('is_default')
+            ->orderBy('id')
             ->value('id');
 
         $this->selectedBankAccountId = BankAccount::where('is_active', true)
@@ -122,6 +386,7 @@ class PosPage extends Page
                 $qq->where('branch_id', $branchId)->orWhereNull('branch_id');
             }))
             ->orderByDesc('is_default')
+            ->orderBy('id')
             ->value('id');
     }
 
@@ -139,15 +404,16 @@ class PosPage extends Page
                 'product_name' => $item->product_name,
                 'product_code' => $item->product_code,
                 'image'        => $product?->image,
+                'item_type'    => $product?->item_type ?? 'stock',
                 'unit'         => $item->unit,
                 'quantity'     => (float) $item->quantity,
                 'unit_price'   => (float) $item->unit_price,
                 'cost_price'   => (float) $item->cost_price,
                 'discount_percent' => (float) ($item->discount_percent ?? 0),
                 'discount_amount'  => (float) ($item->discount_amount ?? 0),
-                'stock'        => $product && $this->currentSession?->warehouse_id
+                'stock'        => $product && !$product->isService() && $this->currentSession?->warehouse_id
                     ? app(WarehouseInventoryService::class)->balance($product, (int) $this->currentSession->warehouse_id)
-                    : (float) $item->stock,
+                    : null,
                 'total'        => (float) $item->total,
                 // ── ZATCA VAT Snapshot ──
                 'vat_type'                  => $item->vat_type ?? 'S',
@@ -160,67 +426,67 @@ class PosPage extends Page
 
     public function openSession(): void
     {
-        if (!$this->selectedBranchId) {
-            Notification::make()->title('اختر الفرع أولاً.')->danger()->send();
-            return;
-        }
+        try {
+            $this->assertPosAccess();
 
-        if (!$this->selectedWarehouseId) {
-            Notification::make()->title('اختر المخزن قبل فتح جلسة الكاشير.')->danger()->send();
-            return;
-        }
-
-        if (!$this->selectedTreasuryId) {
-            Notification::make()->title('اختر خزينة الكاش قبل فتح الجلسة.')->danger()->send();
-            return;
-        }
-
-        $warehouse = Warehouse::whereKey($this->selectedWarehouseId)
-            ->where('is_active', true)
-            ->first();
-
-        $treasury = Treasury::whereKey($this->selectedTreasuryId)
-            ->where('is_active', true)
-            ->first();
-
-        if (!$warehouse || !$treasury) {
-            Notification::make()
-                ->title('المخزن أو الخزينة المختارة غير صالحة/غير نشطة.')
-                ->danger()
-                ->send();
-            return;
-        }
-
-        if ($this->selectedBankAccountId) {
-            $bankOk = BankAccount::whereKey($this->selectedBankAccountId)
-                ->where('is_active', true)
-                ->exists();
-
-            if (!$bankOk) {
-                Notification::make()->title('الحساب البنكي المختار غير نشط.')->danger()->send();
-                return;
+            if (!$this->selectedBranchId) {
+                throw new RuntimeException('اختر الفرع أولاً.');
             }
+
+            $branch = $this->authorizedBranch((int) $this->selectedBranchId);
+
+            if (!$this->selectedWarehouseId) {
+                throw new RuntimeException('اختر المخزن قبل فتح جلسة الكاشير.');
+            }
+
+            $warehouse = $this->authorizedWarehouse($branch, (int) $this->selectedWarehouseId);
+
+            if (!$this->selectedTreasuryId) {
+                throw new RuntimeException('اختر خزينة الكاش قبل فتح الجلسة.');
+            }
+
+            $treasury = $this->authorizedTreasury((int) $this->selectedTreasuryId, $branch);
+            $bankAccount = $this->selectedBankAccountId
+                ? $this->authorizedBankAccount((int) $this->selectedBankAccountId, $branch)
+                : null;
+
+            if ($this->openingCash < 0) {
+                throw new RuntimeException('رصيد الافتتاح لا يمكن أن يكون سالبًا.');
+            }
+
+            // Do not create a second open session for this user, even when a
+            // client submits the action again with a modified Livewire state.
+            $existingSession = PosSession::withoutGlobalScopes()
+                ->where('user_id', auth()->id())
+                ->where('status', 'open')
+                ->first();
+
+            if ($existingSession) {
+                throw new RuntimeException('لديك بالفعل جلسة كاشير مفتوحة. حدّث الصفحة للعودة إليها.');
+            }
+
+            $count = PosSession::withoutGlobalScopes()->count() + 1;
+
+            $this->currentSession = PosSession::create([
+                'session_number'  => 'POS-' . str_pad($count, 4, '0', STR_PAD_LEFT),
+                'user_id'         => auth()->id(),
+                'branch_id'       => $branch->id,
+                'warehouse_id'    => $warehouse->id,
+                'treasury_id'     => $treasury->id,
+                'bank_account_id' => $bankAccount?->id,
+                'register_name'   => 'كاشير ' . $branch->name,
+                'opening_cash'    => $this->openingCash,
+                'status'          => 'open',
+                'opened_at'       => now(),
+            ]);
+
+            $this->showOpenSession = false;
+            $this->cartItems = [];
+
+            Notification::make()->title('تم فتح جلسة الكاشير')->success()->send();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
         }
-
-        $count = PosSession::count() + 1;
-
-        $this->currentSession = PosSession::create([
-            'session_number'  => 'POS-' . str_pad($count, 4, '0', STR_PAD_LEFT),
-            'user_id'         => auth()->id(),
-            'branch_id'       => $this->selectedBranchId,
-            'warehouse_id'    => $this->selectedWarehouseId,
-            'treasury_id'     => $this->selectedTreasuryId,
-            'bank_account_id' => $this->selectedBankAccountId,
-            'register_name'   => 'كاشير ' . (Branch::find($this->selectedBranchId)?->name ?? '1'),
-            'opening_cash'    => $this->openingCash,
-            'status'          => 'open',
-            'opened_at'       => now(),
-        ]);
-
-        $this->showOpenSession = false;
-        $this->cartItems = [];
-
-        Notification::make()->title('تم فتح جلسة الكاشير')->success()->send();
     }
 
     public function cancelOpenSession(): void
@@ -232,7 +498,16 @@ class PosPage extends Page
     public function searchProduct(): void
     {
         if (strlen($this->productSearch) < 1) { $this->productResults = []; return; }
+
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException) {
+            $this->productResults = [];
+            return;
+        }
+
         $term = trim($this->productSearch);
+        $warehouseId = (int) $session->warehouse_id;
 
         $query = Product::query()
             ->with([
@@ -253,17 +528,16 @@ class PosPage extends Page
                         $brand->where('name', 'like', '%' . $term . '%')
                     );
             });
-        if ($this->selectedWarehouseId) {
-            $warehouseId = (int) $this->selectedWarehouseId;
-            $query->whereHas('warehouseStocks', function ($q) use ($warehouseId) {
-                $q->where('warehouse_id', $warehouseId);
-            });
-        }
+        $query->where(function ($items) use ($warehouseId) {
+            $items->where('item_type', 'service')
+                ->orWhereHas('warehouseStocks', function ($stock) use ($warehouseId) {
+                    $stock->where('warehouse_id', $warehouseId);
+                });
+        });
 
-        $warehouseId = (int) ($this->selectedWarehouseId ?? $this->currentSession?->warehouse_id ?? 0);
         $this->productResults = $query->limit(12)->get()->map(function (Product $product) use ($warehouseId) {
             $row = $product->toArray();
-            $row['quantity'] = $warehouseId > 0
+            $row['quantity'] = !$product->isService() && $warehouseId > 0
                 ? app(WarehouseInventoryService::class)->balance($product, $warehouseId)
                 : 0;
             $row['brand_name'] = $product->brand?->name;
@@ -291,18 +565,23 @@ class PosPage extends Page
 
     public function addToCart(int $productId): void
     {
-        if (!$this->currentSession) {
-            Notification::make()->title('افتح جلسة الكاشير أولاً.')->danger()->send();
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
             return;
         }
 
         $product = Product::find($productId);
         if (!$product) return;
 
-        $warehouseId = (int) $this->currentSession->warehouse_id;
-        $warehouseBalance = app(WarehouseInventoryService::class)->balance($product, $warehouseId);
+        $warehouseId = (int) $session->warehouse_id;
+        $isService = $product->isService();
+        $warehouseBalance = $isService
+            ? 0.0
+            : app(WarehouseInventoryService::class)->balance($product, $warehouseId);
 
-        if ($warehouseBalance <= 0) {
+        if (!$isService && $warehouseBalance <= 0) {
             Notification::make()
                 ->title('الصنف غير متاح في مخزن جلسة الكاشير: ' . $product->name)
                 ->danger()
@@ -321,7 +600,7 @@ class PosPage extends Page
         if ($existingKey !== null) {
             $newQty = (float) $this->cartItems[$existingKey]['quantity'] + 1;
 
-            if ($newQty > $warehouseBalance) {
+            if (!$isService && $newQty > $warehouseBalance) {
                 Notification::make()
                     ->title('الكمية المطلوبة أكبر من الرصيد المتاح.')
                     ->danger()
@@ -342,11 +621,13 @@ class PosPage extends Page
             $this->cartItems[$existingKey]['total'] = $line['total'];
 
             if (isset($this->cartItems[$existingKey]['id'])) {
-                PosSessionItem::where('id', $this->cartItems[$existingKey]['id'])->update([
-                    'quantity' => $newQty,
-                    'discount_amount' => $line['discount_amount'],
-                    'total'    => $line['total'],
-                ]);
+                PosSessionItem::where('id', $this->cartItems[$existingKey]['id'])
+                    ->where('pos_session_id', $session->id)
+                    ->update([
+                        'quantity' => $newQty,
+                        'discount_amount' => $line['discount_amount'],
+                        'total'    => $line['total'],
+                    ]);
             }
         } else {
             $vatType = $product->vat_type ?? 'S';
@@ -359,6 +640,7 @@ class PosPage extends Page
                 'product_name' => $product->name,
                 'product_code' => $product->code,
                 'image'        => $product->image,
+                'item_type'    => $product->item_type ?? 'stock',
                 'unit'         => $product->unit,
                 'quantity'     => 1,
                 'unit_price'   => $unitPrice,
@@ -374,10 +656,10 @@ class PosPage extends Page
             ];
 
             $dbPayload = $newItem;
-            unset($dbPayload['image']);
+            unset($dbPayload['image'], $dbPayload['item_type']);
 
             $dbItem = PosSessionItem::create([
-                'pos_session_id' => $this->currentSession->id,
+                'pos_session_id' => $session->id,
                 ...$dbPayload,
             ]);
 
@@ -402,13 +684,21 @@ class PosPage extends Page
 
         if (!isset($this->cartItems[$index])) return;
 
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
+            return;
+        }
+
         $product = Product::find($this->cartItems[$index]['product_id']);
-        $warehouseId = (int) ($this->currentSession?->warehouse_id ?? 0);
-        $warehouseBalance = $product && $warehouseId > 0
+        $warehouseId = (int) $session->warehouse_id;
+        $isService = $product?->isService() ?? false;
+        $warehouseBalance = $product && !$isService && $warehouseId > 0
             ? app(WarehouseInventoryService::class)->balance($product, $warehouseId)
             : 0;
 
-        if (!$product || $qty > $warehouseBalance) {
+        if (!$product || (!$isService && $qty > $warehouseBalance)) {
             Notification::make()
                 ->title('الكمية المطلوبة أكبر من رصيد مخزن جلسة الكاشير.')
                 ->danger()
@@ -429,7 +719,9 @@ class PosPage extends Page
         $this->cartItems[$index]['total'] = $line['total'];
 
         if (isset($this->cartItems[$index]['id'])) {
-            PosSessionItem::where('id', $this->cartItems[$index]['id'])->update([
+            PosSessionItem::where('id', $this->cartItems[$index]['id'])
+                ->where('pos_session_id', $session->id)
+                ->update([
                 'quantity' => $qty,
                 'discount_amount' => $line['discount_amount'],
                 'total'    => $line['total'],
@@ -440,6 +732,13 @@ class PosPage extends Page
     public function updatePrice(int $index, float $price): void
     {
         if ($price < 0 || !isset($this->cartItems[$index])) return;
+
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
+            return;
+        }
 
         $line = $this->lineAmounts(
             (float) $this->cartItems[$index]['quantity'],
@@ -454,7 +753,9 @@ class PosPage extends Page
         $this->cartItems[$index]['total'] = $line['total'];
 
         if (isset($this->cartItems[$index]['id'])) {
-            PosSessionItem::where('id', $this->cartItems[$index]['id'])->update([
+            PosSessionItem::where('id', $this->cartItems[$index]['id'])
+                ->where('pos_session_id', $session->id)
+                ->update([
                 'unit_price' => $price,
                 'discount_amount' => $line['discount_amount'],
                 'total'      => $line['total'],
@@ -464,7 +765,21 @@ class PosPage extends Page
 
     public function removeFromCart(int $index): void
     {
-        if (isset($this->cartItems[$index]['id'])) PosSessionItem::destroy($this->cartItems[$index]['id']);
+        if (!isset($this->cartItems[$index])) return;
+
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
+            return;
+        }
+
+        if (isset($this->cartItems[$index]['id'])) {
+            PosSessionItem::whereKey($this->cartItems[$index]['id'])
+                ->where('pos_session_id', $session->id)
+                ->delete();
+        }
+
         unset($this->cartItems[$index]);
         $this->cartItems = array_values($this->cartItems);
     }
@@ -500,6 +815,13 @@ class PosPage extends Page
     {
         if (!isset($this->cartItems[$index])) return;
 
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
+            return;
+        }
+
         $percent = min(max($percent, 0), 100);
         $item = $this->cartItems[$index];
         $line = $this->lineAmounts(
@@ -515,7 +837,9 @@ class PosPage extends Page
         $this->cartItems[$index]['total'] = $line['total'];
 
         if (isset($item['id'])) {
-            PosSessionItem::whereKey($item['id'])->update([
+            PosSessionItem::whereKey($item['id'])
+                ->where('pos_session_id', $session->id)
+                ->update([
                 'discount_percent' => $percent,
                 'discount_amount'  => $line['discount_amount'],
                 'total'            => $line['total'],
@@ -573,6 +897,12 @@ class PosPage extends Page
         return round($this->getCartSubtotal() - $this->getCartDiscount() + $this->getCartTax(), 2);
     }
 
+    /** Calculate change due to the customer for cash payments. */
+    public function getChange(): float
+    {
+        return round(max(0.0, (float) $this->cashReceived - $this->getCartTotal()), 2);
+    }
+
     /**
      * Generate a unique invoice number.
      *
@@ -585,7 +915,7 @@ class PosPage extends Page
     {
         $candidate = Invoice::generateNumber($type);
 
-        if (!Invoice::where('invoice_number', $candidate)->exists()) {
+        if (!Invoice::withoutGlobalScopes()->where('invoice_number', $candidate)->exists()) {
             return $candidate;
         }
 
@@ -597,7 +927,7 @@ class PosPage extends Page
             do {
                 $number++;
                 $candidate = $prefix . str_pad((string) $number, $width, '0', STR_PAD_LEFT);
-            } while (Invoice::where('invoice_number', $candidate)->exists());
+            } while (Invoice::withoutGlobalScopes()->where('invoice_number', $candidate)->exists());
 
             return $candidate;
         }
@@ -605,7 +935,7 @@ class PosPage extends Page
         // Fallback for an unexpected format returned by generateNumber().
         do {
             $candidate .= '-1';
-        } while (Invoice::where('invoice_number', $candidate)->exists());
+        } while (Invoice::withoutGlobalScopes()->where('invoice_number', $candidate)->exists());
 
         return $candidate;
     }
@@ -645,10 +975,16 @@ class PosPage extends Page
             return;
         }
 
+        $defaultCashReceived = $this->cashReceived <= 0;
         $displayTotal = $this->getCartTotal();
 
+        if (!in_array($this->paymentMethod, ['cash', 'card', 'wallet'], true)) {
+            Notification::make()->title('وسيلة الدفع غير صالحة.')->danger()->send();
+            return;
+        }
+
         if ($this->paymentMethod === 'cash') {
-            if ($this->cashReceived <= 0) {
+            if ($defaultCashReceived) {
                 $this->cashReceived = $displayTotal;
             }
 
@@ -663,16 +999,8 @@ class PosPage extends Page
         }
 
         try {
-            $result = DB::transaction(function () {
-                $session = PosSession::query()
-                    ->whereKey($this->currentSession->id)
-                    ->where('status', 'open')
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$session) {
-                    throw new RuntimeException('جلسة الكاشير مغلقة أو غير موجودة.');
-                }
+            $result = DB::transaction(function () use ($defaultCashReceived) {
+                $session = $this->authorizedCurrentSession(true, true);
 
                 if (!$session->warehouse_id) {
                     throw new RuntimeException('جلسة الكاشير غير مرتبطة بمخزن.');
@@ -689,13 +1017,24 @@ class PosPage extends Page
                     throw new RuntimeException('الدفع الإلكتروني يحتاج حساباً بنكياً مرتبطاً بجلسة الكاشير.');
                 }
 
+                $cartItems = PosSessionItem::query()
+                    ->where('pos_session_id', $session->id)
+                    ->orderBy('id')
+                    ->get()
+                    ->map(fn (PosSessionItem $item) => $item->toArray())
+                    ->all();
+
+                if (!$cartItems) {
+                    throw new RuntimeException('السلة المحفوظة فارغة. أعد إضافة الأصناف قبل إتمام البيع.');
+                }
+
                 $normalizedItems = [];
                 $subtotal = 0;
                 $discountAmount = 0;
                 $taxAmount = 0;
                 $total = 0;
 
-                foreach ($this->cartItems as $cartItem) {
+                foreach ($cartItems as $cartItem) {
                     $product = Product::query()
                         ->whereKey((int) $cartItem['product_id'])
                         ->firstOrFail();
@@ -736,6 +1075,10 @@ class PosPage extends Page
                 $subtotal = round($subtotal, 2);
                 $taxAmount = round($taxAmount, 2);
                 $total = round($total, 2);
+
+                if ($this->paymentMethod === 'cash' && $defaultCashReceived) {
+                    $this->cashReceived = $total;
+                }
 
                 if ($total <= 0) {
                     throw new RuntimeException('إجمالي الفاتورة غير صالح.');
@@ -908,29 +1251,60 @@ class PosPage extends Page
         $this->lastTransaction = null;
     }
 
+    public function requestCloseSessionConfirmation(): void
+    {
+        try {
+            $this->authorizedCurrentSession(false, false, false);
+            $this->showCloseSessionConfirmation = true;
+        } catch (\Throwable $e) {
+            report($e);
+            Notification::make()
+                ->title('تعذر التحقق من جلسة الكاشير')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    public function cancelCloseSessionConfirmation(): void
+    {
+        $this->showCloseSessionConfirmation = false;
+    }
+
     public function closeSession(): void
     {
-        PosSessionItem::where('pos_session_id', $this->currentSession->id)->delete();
-        $this->currentSession->update([
-            'status'       => 'closed',
-            'closing_cash' => $this->currentSession->opening_cash + $this->currentSession->total_cash,
-            'closed_at'    => now(),
-        ]);
-        $this->currentSession = null;
-        $this->showOpenSession = true;
-        $this->cartItems = [];
-        Notification::make()->title('تم إغلاق الجلسة بنجاح')->success()->send();
+        try {
+            DB::transaction(function () {
+                $session = $this->authorizedCurrentSession(true, false, false);
+
+                PosSessionItem::where('pos_session_id', $session->id)->delete();
+                $session->update([
+                    'status'       => 'closed',
+                    'closing_cash' => (float) $session->opening_cash + (float) $session->total_cash,
+                    'closed_at'    => now(),
+                ]);
+            });
+
+            $this->currentSession = null;
+            $this->showOpenSession = true;
+            $this->showCloseSessionConfirmation = false;
+            $this->cartItems = [];
+            Notification::make()->title('تم إغلاق جلسة الكاشير بنجاح')->success()->send();
+        } catch (\Throwable $e) {
+            report($e);
+            $this->showCloseSessionConfirmation = false;
+            Notification::make()->title('تعذر إغلاق جلسة الكاشير')->body($e->getMessage())->danger()->send();
+        }
     }
 
     // ==================== المرتجع ====================
 
     public function openReturnModal(): void
     {
-        if (!$this->currentSession || $this->currentSession->status !== 'open') {
-            Notification::make()
-                ->title('افتح جلسة كاشير قبل تسجيل المرتجع.')
-                ->danger()
-                ->send();
+        try {
+            $this->authorizedCurrentSession();
+        } catch (RuntimeException $e) {
+            Notification::make()->title($e->getMessage())->danger()->send();
             return;
         }
 
@@ -985,7 +1359,11 @@ class PosPage extends Page
             return;
         }
 
-        $session = $this->currentSession;
+        try {
+            $session = $this->authorizedCurrentSession();
+        } catch (RuntimeException) {
+            return;
+        }
 
         /*
          * Only show fully-settled POS sales in the same branch/warehouse.
@@ -1028,9 +1406,7 @@ class PosPage extends Page
         $this->returnError = '';
 
         try {
-            if (!$this->currentSession) {
-                throw new RuntimeException('لا توجد جلسة كاشير مفتوحة.');
-            }
+            $session = $this->authorizedCurrentSession();
 
             $invoice = Invoice::withoutGlobalScopes()
                 ->with(['items', 'customer'])
@@ -1038,7 +1414,7 @@ class PosPage extends Page
 
             [$saleTransaction, $receipt] = $this->resolveOriginalPosSettlement(
                 $invoice,
-                $this->currentSession,
+                $session,
                 false
             );
 
@@ -1146,14 +1522,20 @@ class PosPage extends Page
 
         try {
             $result = DB::transaction(function () use ($requested) {
-                $session = PosSession::query()
-                    ->whereKey($this->currentSession->id)
-                    ->where('status', 'open')
-                    ->lockForUpdate()
-                    ->first();
+                $session = $this->authorizedCurrentSession(true, true);
 
-                if (!$session) {
-                    throw new RuntimeException('جلسة الكاشير مغلقة أو غير موجودة.');
+                $originalInvoiceId = (int) $this->returnInvoice->getKey();
+                $preliminaryOriginal = Invoice::withoutGlobalScopes()
+                    ->whereKey($originalInvoiceId)
+                    ->firstOrFail();
+
+                // Reject another branch's invoice before touching its receipt rows.
+                if (
+                    (string) $preliminaryOriginal->type !== 'sale'
+                    || (int) $preliminaryOriginal->branch_id !== (int) $session->branch_id
+                    || (int) $preliminaryOriginal->warehouse_id !== (int) $session->warehouse_id
+                ) {
+                    throw new RuntimeException('الفاتورة لا تخص فرع ومخزن جلسة الكاشير الحالية.');
                 }
 
                 /*
@@ -1163,7 +1545,7 @@ class PosPage extends Page
                  * return are attempted at the same moment.
                  */
                 $prelockedReceipts = ReceiptVoucher::query()
-                    ->where('invoice_id', $this->returnInvoice->id)
+                    ->where('invoice_id', $originalInvoiceId)
                     ->where('status', 'posted')
                     ->orderBy('id')
                     ->lockForUpdate()
@@ -1176,7 +1558,7 @@ class PosPage extends Page
                 }
 
                 $original = Invoice::withoutGlobalScopes()
-                    ->whereKey($this->returnInvoice->id)
+                    ->whereKey($originalInvoiceId)
                     ->lockForUpdate()
                     ->firstOrFail();
 

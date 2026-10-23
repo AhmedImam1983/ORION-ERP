@@ -111,7 +111,7 @@ class PurchaseOrderForm
                         ->schema([
                             Select::make('product_id')
                                 ->label('الصنف')
-                                ->options(Product::where('is_active', true)->pluck('name', 'id'))
+                                ->options(Product::where('is_active', true)->where('item_type', 'stock')->orderBy('name')->pluck('name', 'id'))
                                 ->searchable()
                                 ->preload()
                                 ->live()

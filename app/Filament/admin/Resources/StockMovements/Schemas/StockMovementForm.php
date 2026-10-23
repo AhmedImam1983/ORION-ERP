@@ -18,7 +18,11 @@ class StockMovementForm
                 ->schema([
                     Select::make('product_id')
                         ->label('الصنف')
-                        ->relationship('product', 'name')
+                        ->options(fn () => \App\Models\Product::query()
+                            ->where('item_type', 'stock')
+                            ->where('is_active', true)
+                            ->orderBy('name')
+                            ->pluck('name', 'id'))
                         ->searchable()
                         ->preload()
                         ->required(),

@@ -237,7 +237,10 @@ class ExcelExportController extends Controller
         $cols = ['الكود', 'الصنف', 'المجموعة', 'الوحدة', 'الكمية الحالية', 'الحد الأدنى', 'سعر البيع', 'سعر التكلفة', 'الحالة'];
         $this->addHeader('تقرير المخزون', $cols);
 
-        $products = Product::with('category')->where('is_active', true)->get();
+        $products = Product::with('category')
+            ->where('item_type', 'stock')
+            ->where('is_active', true)
+            ->get();
         $row = 5;
         foreach ($products as $p) {
             $isLow = ($p->quantity ?? 0) <= $p->min_quantity;

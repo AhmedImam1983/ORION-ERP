@@ -17,6 +17,11 @@ use Illuminate\Support\Facades\DB;
 
 class Dashboard extends Page
 {
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->can('view_dashboard') ?? false;
+    }
+
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-home';
     protected static ?string $navigationLabel = 'لوحة التحكم';
     protected static ?string $title = 'لوحة التحكم';
@@ -24,6 +29,7 @@ class Dashboard extends Page
     protected string $view = 'filament.admin.pages.dashboard';
 
     public bool $isCashier = false;
+    public bool $isBranchUser = false;
 
     // Shared / sales
     public float $totalSalesToday = 0;
@@ -86,12 +92,17 @@ class Dashboard extends Page
     public function mount(): void
     {
         $user = auth()->user();
-        $this->isCashier = (bool) $user?->hasRole('cashier');
+        // Accounting is centralized: accountants with an assigned branch still
+        // need the company-wide financial dashboard. Backup actions remain
+        // separately restricted to admin/super_admin in both Blade and methods.
+        $hasCompanyWideView = (bool) $user?->hasAnyRole(['super_admin', 'admin', 'accountant']);
+        $this->isCashier = !$hasCompanyWideView && (bool) $user?->hasRole('cashier');
+        $this->isBranchUser = !$hasCompanyWideView && !$this->isCashier;
 
         $saleStatuses = ['confirmed', 'paid', 'partial'];
         $today = today();
 
-        $salesQuery = Invoice::query()
+        $salesQuery = $this->invoiceQuery()
             ->where('type', 'sale')
             ->whereIn('status', $saleStatuses)
             ->whereDate('invoice_date', $today);
@@ -103,28 +114,69 @@ class Dashboard extends Page
         $this->totalSalesToday = (float) (clone $salesQuery)->sum('total');
         $this->collectedToday = (float) (clone $salesQuery)->sum('paid_amount');
 
-        $recentQuery = Invoice::with('customer')
-            ->where('type', 'sale')
-            ->whereIn('status', $saleStatuses);
+        if ($this->isBranchUser) {
+            // Branch-bound roles get summary numbers only. Do not hydrate a
+            // company-wide recent-invoice list into their Livewire component.
+            $this->recentInvoices = collect();
+        } else {
+            $recentQuery = $this->invoiceQuery()->with('customer')
+                ->where('type', 'sale')
+                ->whereIn('status', $saleStatuses);
 
-        if ($this->isCashier) {
-            $recentQuery
-                ->where('created_by', $user->id)
-                ->whereDate('invoice_date', $today);
+            if ($this->isCashier) {
+                $recentQuery
+                    ->where('created_by', $user->id)
+                    ->whereDate('invoice_date', $today);
+            }
+
+            $this->recentInvoices = $recentQuery
+                ->latest('created_at')
+                ->limit($this->isCashier ? 8 : 6)
+                ->get();
         }
-
-        $this->recentInvoices = $recentQuery
-            ->latest('created_at')
-            ->limit($this->isCashier ? 8 : 6)
-            ->get();
 
         if ($this->isCashier) {
             $this->loadCashierDashboard($user->id);
+        } elseif ($this->isBranchUser) {
+            $this->loadBranchDashboard($saleStatuses);
         } else {
             $this->loadAdminDashboard($saleStatuses);
+            $this->lastBackup = $this->getLastBackup();
+        }
+    }
+
+    /**
+     * Invoice query for dashboard calculations. The accountant role has a
+     * company-wide finance remit, so dashboard totals include all branches.
+     * Other branch-bound users retain the standard BranchScope.
+     */
+    private function invoiceQuery()
+    {
+        $query = Invoice::query();
+
+        if (auth()->user()?->hasRole('accountant')) {
+            $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
         }
 
-        $this->lastBackup = $this->getLastBackup();
+        return $query;
+    }
+
+    private function loadBranchDashboard(array $saleStatuses): void
+    {
+        // Invoice's BranchScope limits these counts and sums to the current user's
+        // assigned branch. The journal-entry table is not queried here because it
+        // has no branch_id in the current schema.
+        $query = Invoice::query()
+            ->where('type', 'sale')
+            ->whereIn('status', $saleStatuses);
+
+        $this->totalInvoices = (int) (clone $query)->count();
+        $this->totalDebts = (float) (clone $query)
+            ->where('remaining_amount', '>', 0)
+            ->sum('remaining_amount');
+        $this->unpaidCount = (int) (clone $query)
+            ->where('remaining_amount', '>', 0)
+            ->count();
     }
 
     private function loadCashierDashboard(int $userId): void
@@ -185,20 +237,21 @@ class Dashboard extends Page
         $this->totalCustomers = Customer::count();
         $this->accountsCount = Account::count();
 
-        $this->totalDebts = (float) Invoice::where('type', 'sale')
+        $this->totalDebts = (float) $this->invoiceQuery()->where('type', 'sale')
             ->where('status', '!=', 'cancelled')
             ->sum('remaining_amount');
 
-        $this->totalInvoices = Invoice::where('type', 'sale')->count();
+        $this->totalInvoices = $this->invoiceQuery()->where('type', 'sale')->count();
 
-        $this->unpaidCount = Invoice::where('type', 'sale')
+        $this->unpaidCount = $this->invoiceQuery()->where('type', 'sale')
             ->where('remaining_amount', '>', 0)
             ->where('status', '!=', 'cancelled')
             ->count();
 
         $this->pendingOrders = PurchaseOrder::whereIn('status', ['pending', 'approved'])->count();
 
-        $this->lowStockCount = Product::where('quantity', '<=', 5)
+        $this->lowStockCount = Product::where('item_type', 'stock')
+            ->where('quantity', '<=', 5)
             ->where('is_active', true)
             ->count();
 
@@ -250,13 +303,13 @@ class Dashboard extends Page
         // Today vs yesterday.
         $yesterday = now()->copy()->subDay()->toDateString();
 
-        $this->salesYesterday = (float) Invoice::query()
+        $this->salesYesterday = (float) $this->invoiceQuery()
             ->where('type', 'sale')
             ->whereIn('status', $saleStatuses)
             ->whereDate('invoice_date', $yesterday)
             ->sum('total');
 
-        $this->collectedYesterday = (float) Invoice::query()
+        $this->collectedYesterday = (float) $this->invoiceQuery()
             ->where('type', 'sale')
             ->whereIn('status', $saleStatuses)
             ->whereDate('invoice_date', $yesterday)
@@ -271,7 +324,7 @@ class Dashboard extends Page
 
             return [
                 'label' => $date->locale('ar')->isoFormat('ddd'),
-                'value' => (float) Invoice::where('type', 'sale')
+                'value' => (float) $this->invoiceQuery()->where('type', 'sale')
                     ->whereIn('status', $saleStatuses)
                     ->whereDate('invoice_date', $date->toDateString())
                     ->sum('total'),
@@ -283,7 +336,7 @@ class Dashboard extends Page
 
             return [
                 'label' => $date->locale('ar')->isoFormat('ddd'),
-                'value' => (float) Invoice::where('type', 'sale')
+                'value' => (float) $this->invoiceQuery()->where('type', 'sale')
                     ->whereIn('status', $saleStatuses)
                     ->whereDate('invoice_date', $date->toDateString())
                     ->sum('total'),
@@ -366,7 +419,7 @@ class Dashboard extends Page
     private function safeSupplierPayables(): array
     {
         try {
-            $query = Invoice::query()
+            $query = $this->invoiceQuery()
                 ->where('type', 'purchase')
                 ->where('status', '!=', 'cancelled')
                 ->where('remaining_amount', '>', 0);
@@ -426,8 +479,17 @@ class Dashboard extends Page
         return \Carbon\Carbon::createFromTimestamp($latest)->diffForHumans();
     }
 
+    private function authorizeBackupManagement(): void
+    {
+        abort_unless(
+            auth()->check() && auth()->user()->hasAnyRole(['super_admin', 'admin']),
+            403
+        );
+    }
+
     public function makeBackup(): void
     {
+        $this->authorizeBackupManagement();
         \Artisan::call('backup:database');
         $this->lastBackup = $this->getLastBackup();
 
@@ -439,6 +501,7 @@ class Dashboard extends Page
 
     public function openRestore(): void
     {
+        $this->authorizeBackupManagement();
         $backupDir = storage_path('app/backups');
         $files = glob($backupDir . DIRECTORY_SEPARATOR . 'backup_*.sql');
         rsort($files);
@@ -454,10 +517,27 @@ class Dashboard extends Page
 
     public function restoreBackup(string $filename): void
     {
-        $filename = basename($filename);
-        $filepath = storage_path('app/backups/' . $filename);
+        $this->authorizeBackupManagement();
 
-        if (!file_exists($filepath)) {
+        $filename = basename($filename);
+        $backupDirectory = realpath(storage_path('app/backups'));
+
+        if (!preg_match('/^backup_[A-Za-z0-9_.-]+\.sql$/D', $filename) || !$backupDirectory) {
+            Notification::make()
+                ->title('اسم ملف النسخة غير صالح')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $filepath = realpath($backupDirectory . DIRECTORY_SEPARATOR . $filename);
+        $backupPrefix = rtrim($backupDirectory, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        if (
+            $filepath === false
+            || !is_file($filepath)
+            || !str_starts_with($filepath, $backupPrefix)
+        ) {
             Notification::make()
                 ->title('ملف النسخة غير موجود')
                 ->danger()

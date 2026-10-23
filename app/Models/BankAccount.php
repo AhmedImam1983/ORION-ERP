@@ -2,12 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BankAccount extends Model
 {
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'bank_name', 'account_name', 'account_number',
         'iban', 'swift_code', 'currency',
@@ -29,6 +34,7 @@ class BankAccount extends Model
 
 protected static function booted(): void
 {
+        static::addGlobalScope(new BranchScope(true));
     static::creating(function ($bank) {
         if (empty($bank->account_id)) {
             $account = Account::where('code', '1110')->first();

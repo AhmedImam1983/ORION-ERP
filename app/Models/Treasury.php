@@ -2,12 +2,22 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Treasury extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BranchScope(true));
+    }
+
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'name', 'code', 'type', 'branch_id', 'account_id',
         'opening_balance', 'current_balance',

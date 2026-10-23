@@ -150,7 +150,7 @@
         @if($userBranch && !$isAdmin)
             <div class="form-label">الفرع</div>
             <div class="form-input" style="display:flex;align-items:center">{{ $userBranch->name }}</div>
-        @elseif(\App\Models\Branch::where('is_active',true)->count() > 0)
+        @elseif($isAdmin && \App\Models\Branch::where('is_active',true)->count() > 0)
             <div class="form-label">الفرع</div>
             <select wire:model="selectedBranchId" class="form-select">
                 <option value="">اختر الفرع...</option>
@@ -158,13 +158,15 @@
                     <option value="{{ $b->id }}">{{ $b->name }}{{ $b->is_main ? ' (رئيسي)' : '' }}</option>
                 @endforeach
             </select>
+        @else
+            <div class="form-input" style="color:#fca5a5">حسابك غير مرتبط بفرع. اطلب من المدير تعيين فرع لحسابك.</div>
         @endif
 
-        @if(\App\Models\Warehouse::where('is_active',true)->count() > 0)
+        @if($this->getAvailableWarehouses()->isNotEmpty())
             <div class="form-label">المخزن</div>
             <select wire:model="selectedWarehouseId" class="form-select">
                 <option value="">اختر المخزن...</option>
-                @foreach(\App\Models\Warehouse::where('is_active',true)->get() as $w)
+                @foreach($this->getAvailableWarehouses() as $w)
                     <option value="{{ $w->id }}">{{ $w->name }}{{ $w->is_default ? ' (افتراضي)' : '' }}</option>
                 @endforeach
             </select>
@@ -305,7 +307,27 @@
         <div class="session-stat"><span>المبيعات</span><strong>{{ number_format($currentSession->total_sales,2) }}</strong></div>
         <div class="session-stat"><span>افتتاح الخزنة</span><strong>{{ number_format($currentSession->opening_cash,2) }}</strong></div>
         <div class="session-stat"><span>صافي الخزنة</span><strong>{{ number_format($currentSession->opening_cash + $currentSession->total_cash,2) }}</strong></div>
-        <button class="session-close" wire:click="closeSession" onclick="confirm('إغلاق الجلسة؟')||event.stopImmediatePropagation()">إغلاق الجلسة</button>
+        <button class="session-close" wire:click="requestCloseSessionConfirmation">إغلاق الجلسة</button>
+    </div>
+    @endif
+
+    {{-- تأكيد إغلاق الجلسة داخل واجهة Orion بدل نافذة المتصفح --}}
+    @if($showCloseSessionConfirmation)
+    <div class="modal-ov" role="dialog" aria-modal="true" aria-labelledby="close-session-dialog-title">
+        <div class="modal-bx" style="width:430px">
+            <div class="modal-title" id="close-session-dialog-title" style="color:#ff9b9b">تأكيد إغلاق الجلسة</div>
+            <p style="font-size:12px;line-height:1.9;color:#a8b5c9;margin:0 0 12px">
+                هل أنت متأكد إنك عايز تقفل جلسة الكاشير الحالية؟ سيتم حفظ إجمالي الخزنة وإغلاق الجلسة، ومسح الأصناف غير المباعة من سلتها.
+            </p>
+            <div class="modal-row" style="border:0;margin-bottom:12px">
+                <span>رقم الجلسة</span>
+                <strong style="color:#b9a6ff">{{ $currentSession?->session_number ?? '—' }}</strong>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <button type="button" class="btn-ghost" wire:click="cancelCloseSessionConfirmation">إلغاء</button>
+                <button type="button" class="btn-danger" wire:click="closeSession" wire:loading.attr="disabled" wire:target="closeSession">تأكيد الإغلاق</button>
+            </div>
+        </div>
     </div>
     @endif
 
@@ -337,7 +359,11 @@
                                 @if(!empty($product['part_number'])) · {{ $product['part_number'] }} @endif
                                 @if(!empty($product['barcode'])) · {{ $product['barcode'] }} @endif
                             </div>
-                            <div class="sr-stock" style="color:{{ $product['quantity']>0?'#34d399':'#f87171' }}">الرصيد {{ $product['quantity'] }} {{ $product['unit'] }}</div>
+                            @if(($product['item_type'] ?? 'stock') === 'service')
+                                <div class="sr-stock" style="color:#60a5fa">خدمة · لا تخصم من المخزون</div>
+                            @else
+                                <div class="sr-stock" style="color:{{ $product['quantity']>0?'#34d399':'#f87171' }}">الرصيد {{ $product['quantity'] }} {{ $product['unit'] }}</div>
+                            @endif
                             @if(!empty($product['location_codes']))
                                 <div style="font-size:9px;color:#fbbf24;margin-top:2px;">📍 {{ $product['location_codes'] }}</div>
                             @endif
@@ -382,7 +408,12 @@
                                         {{ $item['product_code'] }}
                                         @if(!empty($item['brand_name'])) · {{ $item['brand_name'] }} @endif
                                         @if(!empty($item['part_number'])) · {{ $item['part_number'] }} @endif
-                                        · {{ $item['unit'] }} · رصيد {{ $item['stock'] ?? '?' }}
+                                        · {{ $item['unit'] }}
+                                        @if(($item['item_type'] ?? 'stock') === 'service')
+                                            · خدمة — لا تخصم من المخزون
+                                        @else
+                                            · رصيد {{ $item['stock'] ?? '?' }}
+                                        @endif
                                     </div>
                                 </div>
                             </div>

@@ -45,7 +45,7 @@ class AiChatController extends Controller
             $totalDebts      = \App\Models\Invoice::where('type', 'sale')->where('remaining_amount', '>', 0)->sum('remaining_amount');
             $collectedToday  = \App\Models\Invoice::where('type', 'sale')->whereDate('created_at', today())->sum('paid_amount');
             $unpaidInv       = \App\Models\Invoice::where('type', 'sale')->where('remaining_amount', '>', 0)->where('status', '!=', 'cancelled')->count();
-            $lowStock        = \App\Models\Product::whereRaw('quantity <= min_quantity AND min_quantity > 0')->where('is_active', true)->count();
+            $lowStock        = \App\Models\Product::where('item_type', 'stock')->whereRaw('quantity <= min_quantity AND min_quantity > 0')->where('is_active', true)->count();
             $tm              = now()->startOfMonth();
             $salesThisMonth  = \App\Models\Invoice::where('type', 'sale')->whereIn('status', ['confirmed', 'paid'])->whereDate('invoice_date', '>=', $tm)->sum('total');
             $costsThisMonth  = \App\Models\Invoice::where('type', 'purchase')->whereIn('status', ['confirmed', 'paid'])->whereDate('invoice_date', '>=', $tm)->sum('total');

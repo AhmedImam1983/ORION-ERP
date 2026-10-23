@@ -2,12 +2,22 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BranchScope;
+use App\Models\Concerns\EnforcesBranchAssignment;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class FixedAsset extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BranchScope());
+    }
+
+    use EnforcesBranchAssignment;
+
     protected $fillable = [
         'code', 'name', 'category', 'branch_id', 'purchase_date',
         'purchase_price', 'salvage_value', 'useful_life_years',

@@ -4,6 +4,7 @@ namespace App\Filament\Admin\Resources\Products\Schemas;
 
 use App\Models\Warehouse;
 use App\Models\Product;
+use App\Models\Category;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -21,10 +22,13 @@ class ProductForm
         return $schema->components([
             Section::make('البيانات الأساسية')->schema([
                 TextInput::make('code')
-                    ->label('كود الصنف')
+                    ->label('كود العنصر (تلقائي)')
+                    ->default(fn (): string => Product::nextAutoCode('stock'))
                     ->required()
-                    ->unique(ignoreRecord: true)
-                    ->maxLength(255),
+                    ->readOnly()
+                    ->dehydrated(true)
+                    ->maxLength(255)
+                    ->helperText('يُولّد الكود تلقائيًا حسب النوع: ITEM للأصناف المخزنية وSRV للخدمات.'),
                 TextInput::make('name')
                     ->label('اسم الصنف')
                     ->required()
@@ -33,6 +37,42 @@ class ProductForm
                     ->label('اسم الصنف (إنجليزي)')
                     ->default(null)
                     ->maxLength(255),
+                Select::make('item_type')
+                    ->label('نوع العنصر')
+                    ->options([
+                        'stock' => 'صنف مخزني',
+                        'service' => 'خدمة',
+                    ])
+                    ->default('stock')
+                    ->required()
+                    ->live()
+                    ->disabledOn('edit')
+                    ->afterStateUpdated(function ($state, Set $set, Get $get): void {
+                        $set('code', Product::nextAutoCode((string) $state));
+
+                        if ($state === 'service') {
+                            $set('warehouse_id', null);
+                            $set('quantity', 0);
+                            $set('min_quantity', 0);
+                            $set('cost_price', 0);
+                            $serviceCategoryId = Category::query()
+                                ->where(function ($query) {
+                                    $query->where('code', 'SERVICES')
+                                        ->orWhere('name', 'الخدمات');
+                                })
+                                ->value('id');
+                            if ($serviceCategoryId) {
+                                $set('category_id', (int) $serviceCategoryId);
+                            }
+                            if (blank($get('unit')) || $get('unit') === 'قطعة') {
+                                $set('unit', 'خدمة');
+                            }
+                        } elseif ($state === 'stock') {
+                            $set('warehouse_id', Warehouse::getDefault()?->id);
+                            $set('unit', 'قطعة');
+                        }
+                    })
+                    ->helperText('النوع ثابت بعد إنشاء العنصر لحماية أرصدة المخزون والفواتير. الخدمات لا تنشئ رصيداً مخزنياً.'),
                 Select::make('brand_id')
                     ->label('العلامة التجارية')
                     ->relationship('brand', 'name')
@@ -57,7 +97,8 @@ class ProductForm
                     ->relationship('category', 'name')
                     ->searchable()
                     ->preload()
-                    ->default(null),
+                    ->default(null)
+                    ->helperText('للخدمات اختر مجموعة «الخدمات»؛ نوع العنصر هو الذي يحدد تأثيره على المخزون.'),
                 TextInput::make('unit')
                     ->label('وحدة القياس')
                     ->required()
@@ -75,10 +116,12 @@ class ProductForm
                     ->searchable()
                     ->preload()
                     ->default(fn () => Warehouse::getDefault()?->id)
-                    ->required()
-                    ->helperText('هذا هو المخزن الافتراضي للصنف. تغيير الحقل لاحقاً لا ينقل الرصيد بين المخازن.'),
+                    ->visible(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
+                    ->required(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
+                    ->helperText('الأصناف المخزنية فقط تحتاج مخزناً افتراضياً. تغيير المخزن لا ينقل الرصيد بين المخازن.'),
                 TextInput::make('location_code')
                     ->label('موقع الصنف في المخزن')
+                    ->visible(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
                     ->maxLength(100)
                     ->dehydrated(false)
                     ->afterStateHydrated(function (TextInput $component, ?Product $record): void {
@@ -103,6 +146,7 @@ class ProductForm
                     ->required()
                     ->numeric()
                     ->default(0)
+                    ->visible(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
                     ->prefix('ر.س'),
                 TextInput::make('sale_price')
                     ->label('سعر البيع')
@@ -124,12 +168,14 @@ class ProductForm
                     ->label('الرصيد الافتتاحي')
                     ->numeric()
                     ->default(0)
+                    ->visible(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
                     ->minValue(0)
                     ->disabledOn('edit')
                     ->helperText('عند إنشاء الصنف فقط: يُرحّل هذا الرصيد إلى المخزن الافتراضي. بعد الإنشاء تتغير الكمية من الشراء/البيع/المرتجعات/التحويل والجرد.'),
                 TextInput::make('min_quantity')
                     ->label('الحد الأدنى للمخزون')
-                    ->required()
+                    ->required(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
+                    ->visible(fn (Get $get): bool => ($get('item_type') ?? 'stock') !== 'service')
                     ->numeric()
                     ->default(0)
                     ->helperText('سيظهر تنبيه عند الوصول لهذا الحد'),

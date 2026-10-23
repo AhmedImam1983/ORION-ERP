@@ -26,7 +26,7 @@ class ViewProduct extends ViewRecord
                 ->label('تحديد مخزن الرصيد الحالي')
                 ->icon('heroicon-o-map-pin')
                 ->color('info')
-                ->visible(fn () => !$record->warehouseStocks()->exists())
+                ->visible(fn () => !$record->isService() && !$record->warehouseStocks()->exists())
                 ->form([
                     Select::make('warehouse_id')
                         ->label('المخزن')
@@ -58,7 +58,7 @@ class ViewProduct extends ViewRecord
                 ->label('تحويل بين المخازن')
                 ->icon('heroicon-o-arrows-right-left')
                 ->color('warning')
-                ->visible(fn () => $record->warehouseStocks()->where('quantity', '>', 0)->exists())
+                ->visible(fn () => !$record->isService() && $record->warehouseStocks()->where('quantity', '>', 0)->exists())
                 ->form([
                     Select::make('from_warehouse_id')
                         ->label('من مخزن')

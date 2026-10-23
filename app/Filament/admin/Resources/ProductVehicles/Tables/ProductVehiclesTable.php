@@ -67,7 +67,7 @@ class ProductVehiclesTable
             ->filters([
                 SelectFilter::make('product_id')
                     ->label('الصنف')
-                    ->relationship('product', 'name')
+                    ->relationship('product', 'name', modifyQueryUsing: fn ($query) => $query->where('item_type', 'stock'))
                     ->searchable()
                     ->preload(),
             ])
