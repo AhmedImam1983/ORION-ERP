@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Invoice;
 use App\Services\ZatcaService;
+use App\Models\ZatcaInvoiceSubmission;
 use Tests\TestCase;
 
 class ZatcaSubmissionSafetyTest extends TestCase
@@ -84,4 +85,16 @@ class ZatcaSubmissionSafetyTest extends TestCase
             'status' => $status,
         ]);
     }
+
+    public function test_legacy_401_without_saved_response_is_not_ambiguous_even_if_error_names_reporting_step(): void
+{
+    $submission = new ZatcaInvoiceSubmission([
+        'status' => ZatcaInvoiceSubmission::STATUS_FAILED,
+        'status_code' => 401,
+        'response' => null,
+        'error' => '[9d-call-reporting-api] Unauthorized',
+    ]);
+
+    $this->assertFalse($submission->hasAmbiguousOutcome());
+}
 }

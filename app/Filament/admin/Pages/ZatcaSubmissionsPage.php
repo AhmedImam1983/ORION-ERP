@@ -49,7 +49,7 @@ class ZatcaSubmissionsPage extends Page
 
     public function updatedStatusFilter(): void
     {
-        if (!in_array($this->statusFilter, ['all', 'not_sent', 'sent', 'failed', 'processing', 'pending'], true)) {
+        if (!in_array($this->statusFilter, ['all', 'not_sent', 'sent', 'failed', 'processing', 'pending', 'uncertain'], true)) {
             $this->statusFilter = 'all';
         }
 
@@ -82,6 +82,10 @@ class ZatcaSubmissionsPage extends Page
                 $join->on('zatca_current.invoice_id', '=', 'invoices.id')
                     ->where('zatca_current.environment', '=', $environment);
             })
+            ->leftJoin('zatca_invoice_submissions as zatca_legacy_unknown', function ($join) {
+                $join->on('zatca_legacy_unknown.invoice_id', '=', 'invoices.id')
+                    ->where('zatca_legacy_unknown.environment', '=', 'unknown');
+            })
             ->select([
                 'invoices.*',
                 'zatca_current.id as zatca_page_submission_id',
@@ -93,6 +97,8 @@ class ZatcaSubmissionsPage extends Page
                 'zatca_current.sent_at as zatca_page_sent_at',
                 'zatca_current.error as zatca_page_error',
                 'zatca_current.sending_mode as zatca_page_sending_mode',
+                'zatca_legacy_unknown.id as zatca_page_legacy_unknown_id',
+                'zatca_legacy_unknown.error as zatca_page_legacy_unknown_error',
             ]);
 
         if (trim($this->search) !== '') {
@@ -107,6 +113,17 @@ class ZatcaSubmissionsPage extends Page
             $query->where(function (Builder $inner) {
                 $inner->whereNull('zatca_current.id')
                     ->orWhere('zatca_current.status', '!=', ZatcaInvoiceSubmission::STATUS_SENT);
+            });
+        } elseif ($this->statusFilter === 'uncertain') {
+            $query->where(function (Builder $inner) {
+                $inner->where('zatca_current.status', ZatcaInvoiceSubmission::STATUS_UNCERTAIN)
+                    ->orWhere(function (Builder $legacy) {
+                        $legacy->whereNotNull('zatca_legacy_unknown.id')
+                            ->where(function (Builder $current) {
+                                $current->whereNull('zatca_current.id')
+                                    ->orWhere('zatca_current.status', '!=', ZatcaInvoiceSubmission::STATUS_SENT);
+                            });
+                    });
             });
         } elseif (in_array($this->statusFilter, ['sent', 'failed', 'processing', 'pending'], true)) {
             $query->where('zatca_current.status', $this->statusFilter);
@@ -137,17 +154,39 @@ class ZatcaSubmissionsPage extends Page
             ->pluck('total', 'submission_status');
 
         $sent = (int) ($counts[ZatcaInvoiceSubmission::STATUS_SENT] ?? 0);
+        $uncertain = $this->eligibleInvoicesQuery()
+            ->leftJoin('zatca_invoice_submissions as zatca_uncertain_current', function ($join) use ($environment) {
+                $join->on('zatca_uncertain_current.invoice_id', '=', 'invoices.id')
+                    ->where('zatca_uncertain_current.environment', '=', $environment);
+            })
+            ->leftJoin('zatca_invoice_submissions as zatca_uncertain_legacy', function ($join) {
+                $join->on('zatca_uncertain_legacy.invoice_id', '=', 'invoices.id')
+                    ->where('zatca_uncertain_legacy.environment', '=', 'unknown');
+            })
+            ->where(function (Builder $inner) {
+                $inner->where('zatca_uncertain_current.status', ZatcaInvoiceSubmission::STATUS_UNCERTAIN)
+                    ->orWhere(function (Builder $legacy) {
+                        $legacy->whereNotNull('zatca_uncertain_legacy.id')
+                            ->where(function (Builder $current) {
+                                $current->whereNull('zatca_uncertain_current.id')
+                                    ->orWhere('zatca_uncertain_current.status', '!=', ZatcaInvoiceSubmission::STATUS_SENT);
+                            });
+                    });
+            })
+            ->distinct()
+            ->count('invoices.id');
 
         return [
             'eligible' => (int) $eligible,
             'sent' => $sent,
             'failed' => (int) ($counts[ZatcaInvoiceSubmission::STATUS_FAILED] ?? 0),
             'processing' => (int) ($counts[ZatcaInvoiceSubmission::STATUS_PROCESSING] ?? 0),
+            'uncertain' => (int) $uncertain,
             'not_sent' => max(0, (int) $eligible - $sent),
         ];
     }
 
-    /** Open an in-page confirmation dialog before submitting an invoice. */
+    /** Open confirmation only when the stored state is safe to attempt. */
     public function requestSendConfirmation(int $invoiceId): void
     {
         $invoice = $this->eligibleInvoicesQuery()
@@ -163,7 +202,86 @@ class ZatcaSubmissionsPage extends Page
             return;
         }
 
+        $environment = $this->environment === 'production' ? 'production' : 'test';
+        $current = ZatcaInvoiceSubmission::query()
+            ->where('invoice_id', $invoiceId)
+            ->where('environment', $environment)
+            ->first();
+        $legacyUnknownExists = ZatcaInvoiceSubmission::query()
+            ->where('invoice_id', $invoiceId)
+            ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+            ->exists();
+
+        if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_SENT) {
+            Notification::make()
+                ->title('الفاتورة مرسلة بالفعل')
+                ->body('لن نكرر الإرسال إلى البيئة نفسها.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        if ($legacyUnknownExists
+            || ($current && $current->status === ZatcaInvoiceSubmission::STATUS_UNCERTAIN)
+            || ($current && $current->status === ZatcaInvoiceSubmission::STATUS_FAILED && $current->hasAmbiguousOutcome())
+            || ($current && $current->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
+                && (!$current->last_attempt_at || $current->last_attempt_at->lte(now()->subMinutes(30))))) {
+            $this->inspectSubmissionState($invoiceId);
+            return;
+        }
+
+        if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_PROCESSING) {
+            Notification::make()
+                ->title('الإرسال قيد التنفيذ')
+                ->body('انتظر انتهاء المحاولة الحالية قبل اتخاذ أي إجراء.')
+                ->warning()
+                ->send();
+            return;
+        }
+
         $this->confirmingInvoiceId = (int) $invoice->id;
+    }
+
+    /** Repair a stale local state only; this action never sends a request to ZATCA. */
+    public function inspectSubmissionState(int $invoiceId): void
+    {
+        if (!$this->eligibleInvoicesQuery()->where('invoices.id', $invoiceId)->exists()) {
+            Notification::make()
+                ->title('الفاتورة غير متاحة للمراجعة')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        $environment = $this->environment === 'production' ? 'production' : 'test';
+        $result = app(ZatcaService::class)->protectStaleSubmission($invoiceId, $environment);
+
+        $status = $result['status'] ?? 'failed';
+        $message = $result['error'] ?? 'لم تتغير حالة السجل.';
+
+        if ($status === 'uncertain') {
+            Notification::make()
+                ->title('نتيجة الإرسال غير محسومة — لا تعاود الإرسال')
+                ->body($message)
+                ->warning()
+                ->send();
+            return;
+        }
+
+        if ($status === 'processing') {
+            Notification::make()
+                ->title('الإرسال ما زال قيد التنفيذ')
+                ->body($message)
+                ->info()
+                ->send();
+            return;
+        }
+
+        Notification::make()
+            ->title($status === 'sent' ? 'الفاتورة مرسلة بالفعل' : 'تم فحص حالة المحاولة')
+            ->body($message)
+            ->warning()
+            ->send();
     }
 
     public function cancelSendConfirmation(): void
@@ -241,6 +359,15 @@ class ZatcaSubmissionsPage extends Page
                     ->title('الإرسال قيد التنفيذ')
                     ->body(($result['error'] ?? 'توجد محاولة إرسال جارية.') . ' | البيئة: ' . $label)
                     ->info()
+                    ->send();
+                return;
+            }
+
+            if (!empty($result['needs_reconciliation'])) {
+                Notification::make()
+                    ->title('نتيجة إرسال زاتكا غير محسومة — لا تعاود الإرسال')
+                    ->body(($result['error'] ?? 'راجع السجل قبل أي محاولة جديدة.') . ' | البيئة: ' . $label)
+                    ->warning()
                     ->send();
                 return;
             }
