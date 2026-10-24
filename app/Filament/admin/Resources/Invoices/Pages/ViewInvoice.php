@@ -57,7 +57,10 @@ class ViewInvoice extends ViewRecord
             Action::make('zatca_submit')
                 ->label(fn () => $this->record->zatca_sent ? 'إعادة إرسال لزاتكا' : 'إرسال إلى زاتكا')
                 ->color(fn () => $this->record->zatca_sent ? 'info' : 'primary')
-                ->visible(fn () => in_array($this->record->type, ['sale'], true) && $this->record->status !== 'draft')
+                ->visible(fn () =>
+                    in_array($this->record->type, ['sale'], true)
+                    && in_array($this->record->status, ['confirmed', 'partial', 'paid'], true)
+                )
                 ->requiresConfirmation()
                 ->modalHeading('إرسال الفاتورة إلى زاتكا')
                 ->modalDescription('اختر بيئة الإرسال. Test للاختبار فقط؛ وProduction سيظل محظورًا ما دام الإرسال الحقيقي معطّلًا على هذا الخادم.')
