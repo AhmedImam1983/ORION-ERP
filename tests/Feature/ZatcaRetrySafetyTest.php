@@ -7,9 +7,15 @@ use PHPUnit\Framework\TestCase;
 
 class ZatcaRetrySafetyTest extends TestCase
 {
-    public function test_accepted_202_response_is_not_ambiguous(): void
+    public function test_http_200_and_202_are_accepted_statuses(): void
     {
-        $this->assertFalse(ZatcaInvoiceSubmission::isAmbiguousApiResponse(202, true));
+        $this->assertTrue(ZatcaInvoiceSubmission::isAcceptedApiStatus(200));
+        $this->assertTrue(ZatcaInvoiceSubmission::isAcceptedApiStatus(202));
+        $this->assertFalse(ZatcaInvoiceSubmission::isAcceptedApiStatus(201));
+
+        $this->assertFalse(ZatcaInvoiceSubmission::isAmbiguousApiResponse(200, true));
+        // 202 is documented as accepted with warnings, even if the COM success flag is false.
+        $this->assertFalse(ZatcaInvoiceSubmission::isAmbiguousApiResponse(202, false));
     }
 
     public function test_explicit_client_rejection_is_not_ambiguous(): void
@@ -30,8 +36,28 @@ class ZatcaRetrySafetyTest extends TestCase
 
     public function test_unexpected_success_status_is_ambiguous(): void
     {
-        $this->assertTrue(ZatcaInvoiceSubmission::isAmbiguousApiResponse(200, true));
         $this->assertTrue(ZatcaInvoiceSubmission::isAmbiguousApiResponse(201, true));
+        $this->assertTrue(ZatcaInvoiceSubmission::isAmbiguousApiResponse(204, true));
+    }
+
+    public function test_legacy_failed_200_and_202_responses_are_quarantined_for_recovery(): void
+    {
+        $legacyResponses = [
+            [200, '{"status_code":200,"is_success":true,"error":null}'],
+            [202, '{"status_code":202,"is_success":false,"error":"accepted with warnings"}'],
+        ];
+
+        foreach ($legacyResponses as [$statusCode, $response]) {
+            $submission = new ZatcaInvoiceSubmission([
+                'status' => ZatcaInvoiceSubmission::STATUS_FAILED,
+                'status_code' => $statusCode,
+                'response' => $response,
+                'error' => null,
+            ]);
+
+            $this->assertTrue($submission->hasAcceptedStoredResponse());
+            $this->assertTrue($submission->hasAmbiguousOutcome());
+        }
     }
 
     public function test_legacy_failed_request_with_no_response_at_reporting_step_is_ambiguous(): void

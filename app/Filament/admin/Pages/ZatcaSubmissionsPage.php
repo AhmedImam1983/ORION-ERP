@@ -92,6 +92,7 @@ class ZatcaSubmissionsPage extends Page
                 'zatca_current.status as zatca_page_status',
                 'zatca_current.attempts as zatca_page_attempts',
                 'zatca_current.status_code as zatca_page_status_code',
+                'zatca_current.response as zatca_page_response',
                 'zatca_current.uuid as zatca_page_uuid',
                 'zatca_current.last_attempt_at as zatca_page_last_attempt_at',
                 'zatca_current.sent_at as zatca_page_sent_at',
@@ -373,9 +374,16 @@ class ZatcaSubmissionsPage extends Page
             }
 
             if (!empty($result['success'])) {
+                $acceptedTitle = !empty($result['accepted_with_warnings'])
+                    ? 'تم قبول الفاتورة مع تحذيرات من زاتكا'
+                    : 'تم قبول إرسال الفاتورة من زاتكا';
+                $apiMessage = !empty($result['api_message'])
+                    ? ' | ملاحظات زاتكا: ' . $result['api_message']
+                    : '';
+
                 Notification::make()
-                    ->title('تم قبول إرسال الفاتورة من زاتكا')
-                    ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | الحالة: ' . ($result['status_code'] ?? '-') . ' | البيئة: ' . $label)
+                    ->title($acceptedTitle)
+                    ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | الحالة: ' . ($result['status_code'] ?? '-') . ' | البيئة: ' . $label . $apiMessage)
                     ->success()
                     ->send();
                 return;
