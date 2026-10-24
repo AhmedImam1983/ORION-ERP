@@ -55,39 +55,90 @@ class ViewInvoice extends ViewRecord
 
             // ══ إرسال إلى زاتكا ══════════════════════════════════
             Action::make('zatca_submit')
-                ->label(fn() => $this->record->zatca_sent ? 'إعادة إرسال لزاتكا' : 'إرسال إلى زاتكا')
-                ->color(fn() => $this->record->zatca_sent ? 'info' : 'primary')
-                ->visible(fn() => in_array($this->record->type, ['sale']) && $this->record->status !== 'draft')
+                ->label(fn () => $this->record->zatca_sent ? 'إعادة إرسال لزاتكا' : 'إرسال إلى زاتكا')
+                ->color(fn () => $this->record->zatca_sent ? 'info' : 'primary')
+                ->visible(fn () => in_array($this->record->type, ['sale'], true) && $this->record->status !== 'draft')
                 ->requiresConfirmation()
                 ->modalHeading('إرسال الفاتورة إلى زاتكا')
-                ->modalDescription('سيتم إرسال الفاتورة إلى منظومة زاتكا السعودية. تأكد من صحة البيانات الضريبية.')
-                ->modalSubmitActionLabel('إرسال')
-                ->action(function () {
-                    try {
-                        $result = app(ZatcaService::class)->submitInvoice($this->record);
+                ->modalDescription('اختر بيئة الإرسال. Test للاختبار فقط؛ وProduction سيظل محظورًا ما دام الإرسال الحقيقي معطّلًا على هذا الخادم.')
+                ->modalSubmitActionLabel('تأكيد الإرسال')
+                ->form([
+                    Select::make('environment')
+                        ->label('بيئة الإرسال')
+                        ->options([
+                            'test' => 'Test — بيئة الاختبار',
+                            'production' => 'Production — البيئة الفعلية',
+                        ])
+                        ->default('test')
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $environment = strtolower(trim((string) ($data['environment'] ?? 'test')));
+                    $environmentLabel = $environment === 'production' ? 'Production' : 'Test';
 
-                        if ($result['success']) {
-                            Notification::make()
-                                ->title('تم إرسال الفاتورة إلى زاتكا')
-                                ->body('UUID: ' . $result['uuid'] . ' | بيئة: ' . $result['environment'])
-                                ->success()
-                                ->send();
-                        } else {
-                            Notification::make()
-                                ->title('فشل إرسال الفاتورة إلى زاتكا')
-                                ->body($result['error'])
-                                ->danger()
-                                ->send();
-                        }
+                    if (!in_array($environment, ['test', 'production'], true)) {
+                        Notification::make()
+                            ->title('بيئة إرسال غير صالحة')
+                            ->danger()
+                            ->send();
+                        return;
+                    }
+
+                    try {
+                        $result = app(ZatcaService::class)->submitInvoice($this->record, $environment);
 
                         $this->refreshFormData([
                             'zatca_sent', 'zatca_uuid', 'zatca_status_code',
                             'zatca_environment', 'zatca_error',
                         ]);
 
-                    } catch (\Exception $e) {
+                        if (!empty($result['already_sent'])) {
+                            Notification::make()
+                                ->title('الفاتورة مرسلة بالفعل إلى هذه البيئة')
+                                ->body(($result['error'] ?? 'لن نكرر الإرسال تلقائيًا.') . ' — البيئة: ' . $environmentLabel)
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        if (!empty($result['in_progress'])) {
+                            Notification::make()
+                                ->title('هناك إرسال قيد التنفيذ')
+                                ->body(($result['error'] ?? 'انتظر حتى تنتهي المحاولة الحالية.') . ' — البيئة: ' . $environmentLabel)
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        if (!empty($result['success'])) {
+                            Notification::make()
+                                ->title('تم قبول إرسال الفاتورة من زاتكا')
+                                ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | البيئة: ' . $environmentLabel)
+                                ->success()
+                                ->send();
+                            return;
+                        }
+
+                        $error = (string) ($result['error'] ?? 'خطأ غير معروف');
+                        $productionBlocked = $environment === 'production'
+                            && str_contains($error, 'معطل افتراضيًا');
+
+                        $notification = Notification::make()
+                            ->title($productionBlocked ? 'الإرسال إلى Production معطّل' : 'فشل إرسال الفاتورة إلى زاتكا')
+                            ->body($error . ' | البيئة: ' . $environmentLabel);
+
+                        if ($productionBlocked) {
+                            $notification->warning();
+                        } else {
+                            $notification->danger();
+                        }
+
+                        $notification->send();
+
+                    } catch (\Throwable $e) {
                         Notification::make()
-                            ->title('خطأ: ' . $e->getMessage())
+                            ->title('تعذر تنفيذ إرسال زاتكا')
+                            ->body($e->getMessage())
                             ->danger()
                             ->send();
                     }

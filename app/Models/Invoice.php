@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Scopes\BranchScope;
-use App\Models\Concerns\EnforcesBranchAssignment;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,8 +10,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Invoice extends Model
 {
-    use EnforcesBranchAssignment;
-
     use SoftDeletes;
 
     protected $fillable = [
@@ -79,6 +76,11 @@ class Invoice extends Model
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class);
+    }
+
+    public function zatcaSubmissions(): HasMany
+    {
+        return $this->hasMany(ZatcaInvoiceSubmission::class);
     }
 
     public function branch(): BelongsTo

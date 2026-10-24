@@ -56,7 +56,9 @@ class SettingsPage extends Page implements HasForms
             'company_cr', 'company_phone', 'company_email', 'company_website',
             'company_country', 'company_city', 'company_district',
             'company_street', 'company_building', 'company_postal',
-            'zatca_sending_mode', 'zatca_cert_path', 'zatca_key_path', 'zatca_secret', 'zatca_secret_path',
+            // Legacy settings are retained for compatibility while the sender is migrated.
+            'zatca_sending_mode', 'zatca_cert_path', 'zatca_key_path',
+            'zatca_secret', 'zatca_secret_path', 'zatca_root_path',
             'currency_code', 'currency_symbol',
         ];
 
@@ -73,6 +75,63 @@ class SettingsPage extends Page implements HasForms
         if (blank($data['zatca_sending_mode'] ?? null)) {
             $data['zatca_sending_mode'] = 'simulation';
         }
+
+        $legacyMode = (string) $data['zatca_sending_mode'];
+        $legacyIsProduction = $legacyMode === 'production';
+        $legacyRoot = trim((string) ($data['zatca_root_path'] ?? ''));
+        if ($legacyRoot === '') {
+            $legacyRoot = 'D:\\ZatcaIntegration';
+        }
+        $rootBase = rtrim($legacyRoot, "\\/");
+
+        // Backward-compatible defaults: existing credentials are assigned only to
+        // the environment that was active in the old single-environment settings.
+        $testModeDefault = in_array($legacyMode, ['simulation', 'compliance'], true)
+            ? $legacyMode
+            : 'simulation';
+
+        $data['zatca_test_mode'] = Setting::get('zatca_test_mode', $testModeDefault);
+        $data['zatca_test_cert_path'] = Setting::get(
+            'zatca_test_cert_path',
+            $legacyIsProduction ? '' : (string) ($data['zatca_cert_path'] ?? '')
+        );
+        $data['zatca_test_key_path'] = Setting::get(
+            'zatca_test_key_path',
+            $legacyIsProduction ? '' : (string) ($data['zatca_key_path'] ?? '')
+        );
+        $data['zatca_test_secret'] = Setting::get(
+            'zatca_test_secret',
+            $legacyIsProduction ? '' : (string) ($data['zatca_secret'] ?? '')
+        );
+        $data['zatca_test_secret_path'] = Setting::get(
+            'zatca_test_secret_path',
+            $legacyIsProduction ? '' : (string) ($data['zatca_secret_path'] ?? '')
+        );
+        $data['zatca_test_root_path'] = Setting::get(
+            'zatca_test_root_path',
+            $legacyIsProduction ? $rootBase . DIRECTORY_SEPARATOR . 'Test' : $legacyRoot
+        );
+
+        $data['zatca_production_cert_path'] = Setting::get(
+            'zatca_production_cert_path',
+            $legacyIsProduction ? (string) ($data['zatca_cert_path'] ?? '') : ''
+        );
+        $data['zatca_production_key_path'] = Setting::get(
+            'zatca_production_key_path',
+            $legacyIsProduction ? (string) ($data['zatca_key_path'] ?? '') : ''
+        );
+        $data['zatca_production_secret'] = Setting::get(
+            'zatca_production_secret',
+            $legacyIsProduction ? (string) ($data['zatca_secret'] ?? '') : ''
+        );
+        $data['zatca_production_secret_path'] = Setting::get(
+            'zatca_production_secret_path',
+            $legacyIsProduction ? (string) ($data['zatca_secret_path'] ?? '') : ''
+        );
+        $data['zatca_production_root_path'] = Setting::get(
+            'zatca_production_root_path',
+            $legacyIsProduction ? $legacyRoot : $rootBase . DIRECTORY_SEPARATOR . 'Production'
+        );
 
         if (blank($data['currency_code'] ?? null)) {
             $data['currency_code'] = 'SAR';
@@ -183,48 +242,78 @@ class SettingsPage extends Page implements HasForms
                                     ->label('')
                                     ->content(fn () => $this->getZatcaBrandCard()),
 
-                                Section::make('بيئة الإرسال')
-                                    ->description('اختر بيئة زاتكا الحالية. يفضّل إنهاء الاختبارات قبل الانتقال إلى البيئة الإنتاجية.')
+                                Section::make('البيئة التجريبية (Test)')
+                                    ->description('إعدادات مستقلة للاختبار. لن تُستخدم الشهادة أو بيانات المصادقة هنا عند الإرسال إلى البيئة الفعلية.')
                                     ->schema([
-                                        Select::make('zatca_sending_mode')
-                                            ->label('بيئة الإرسال')
+                                        Select::make('zatca_test_mode')
+                                            ->label('نمط الربط التجريبي')
                                             ->options([
-                                                'simulation' => 'تجريبية (Simulation)',
-                                                'compliance' => 'امتثال (Compliance)',
-                                                'production' => 'إنتاجية (Production)',
+                                                'simulation' => 'Simulation — تجريبي',
+                                                'compliance' => 'Compliance — امتثال',
                                             ])
                                             ->required()
-                                            ->helperText('ابدأ بالبيئة التجريبية ثم اختبر الامتثال قبل الإنتاج.'),
-                                    ]),
-
-                                Section::make('بيانات المصادقة والشهادات')
-                                    ->description('يمكن استخدام Secret مباشر أو مسار ملف secret.txt. لا يلزم استخدام الطريقتين معًا.')
-                                    ->schema([
+                                            ->helperText('يحدد مسار الربط داخل إعدادات الاختبار فقط.'),
                                         Grid::make(2)->schema([
-                                            TextInput::make('zatca_secret')
-                                                ->label('Secret مباشر')
+                                            TextInput::make('zatca_test_secret')
+                                                ->label('Secret التجريبي')
                                                 ->password()
                                                 ->revealable()
                                                 ->maxLength(500)
                                                 ->helperText('اختياري عند استخدام ملف secret.txt.'),
-                                            TextInput::make('zatca_secret_path')
-                                                ->label('مسار ملف secret.txt')
-                                                ->placeholder('D:\\ZatcaIntegration\\cert\\secret.txt'),
-                                            TextInput::make('zatca_cert_path')
-                                                ->label('مسار الشهادة Certificate (.pem)')
-                                                ->placeholder(storage_path('app/zatca/cert.pem'))
-                                                ->helperText('المسار الكامل للملف على السيرفر')
+                                            TextInput::make('zatca_test_secret_path')
+                                                ->label('مسار ملف Secret التجريبي')
+                                                ->placeholder('D:\\ZatcaIntegration\\Test\\cert\\secret.txt'),
+                                            TextInput::make('zatca_test_cert_path')
+                                                ->label('مسار شهادة الاختبار Certificate (.pem)')
+                                                ->placeholder(storage_path('app/zatca/test/cert.pem'))
+                                                ->helperText('المسار الكامل للشهادة التجريبية على السيرفر')
                                                 ->columnSpanFull(),
-                                            TextInput::make('zatca_key_path')
-                                                ->label('مسار المفتاح الخاص Private Key (.key/.pem)')
-                                                ->placeholder(storage_path('app/zatca/private.key'))
-                                                ->helperText('المسار الكامل للملف على السيرفر')
+                                            TextInput::make('zatca_test_key_path')
+                                                ->label('مسار المفتاح الخاص للاختبار (.key/.pem)')
+                                                ->placeholder(storage_path('app/zatca/test/private.key'))
+                                                ->helperText('المسار الكامل للمفتاح التجريبي على السيرفر')
+                                                ->columnSpanFull(),
+                                            TextInput::make('zatca_test_root_path')
+                                                ->label('مجلد ملفات XML ونتائج الاختبار')
+                                                ->placeholder('D:\\ZatcaIntegration\\Test')
+                                                ->required()
                                                 ->columnSpanFull(),
                                         ]),
                                     ]),
 
-                                Section::make('حالة التكامل')
-                                    ->description('قراءة فورية لأهم متطلبات الربط على السيرفر الحالي.')
+                                Section::make('البيئة الفعلية (Production)')
+                                    ->description('إعدادات مستقلة للإنتاج الحقيقي. راجع بيانات الشهادة والـ Secret قبل الإرسال إلى الهيئة.')
+                                    ->schema([
+                                        Grid::make(2)->schema([
+                                            TextInput::make('zatca_production_secret')
+                                                ->label('Secret الإنتاج')
+                                                ->password()
+                                                ->revealable()
+                                                ->maxLength(500)
+                                                ->helperText('اختياري عند استخدام ملف secret.txt.'),
+                                            TextInput::make('zatca_production_secret_path')
+                                                ->label('مسار ملف Secret للإنتاج')
+                                                ->placeholder('D:\\ZatcaIntegration\\Production\\cert\\secret.txt'),
+                                            TextInput::make('zatca_production_cert_path')
+                                                ->label('مسار شهادة الإنتاج Certificate (.pem)')
+                                                ->placeholder(storage_path('app/zatca/production/cert.pem'))
+                                                ->helperText('المسار الكامل لشهادة الإنتاج على السيرفر')
+                                                ->columnSpanFull(),
+                                            TextInput::make('zatca_production_key_path')
+                                                ->label('مسار المفتاح الخاص للإنتاج (.key/.pem)')
+                                                ->placeholder(storage_path('app/zatca/production/private.key'))
+                                                ->helperText('المسار الكامل لمفتاح الإنتاج على السيرفر')
+                                                ->columnSpanFull(),
+                                            TextInput::make('zatca_production_root_path')
+                                                ->label('مجلد ملفات XML ونتائج الإنتاج')
+                                                ->placeholder('D:\\ZatcaIntegration\\Production')
+                                                ->required()
+                                                ->columnSpanFull(),
+                                        ]),
+                                    ]),
+
+                                Section::make('حالة التكامل لكل بيئة')
+                                    ->description('يعرض حالة الشهادات وبيانات المصادقة بشكل مستقل لكل بيئة.')
                                     ->schema([
                                         Placeholder::make('zatca_status_board')
                                             ->label('')
@@ -296,27 +385,31 @@ class SettingsPage extends Page implements HasForms
     public function checkZatcaSetup(): void
     {
         $state = $this->data ?? [];
-
-        $vat = preg_replace('/\D+/', '', (string) ($state['company_tax_number'] ?? ''));
-        $vatOk = strlen($vat) === 15;
-
-        $certPath = trim((string) ($state['zatca_cert_path'] ?? ''));
-        $keyPath = trim((string) ($state['zatca_key_path'] ?? ''));
-        $secretPath = trim((string) ($state['zatca_secret_path'] ?? ''));
-        $secret = trim((string) ($state['zatca_secret'] ?? ''));
-
-        $certOk = $certPath !== '' && file_exists($certPath);
-        $keyOk = $keyPath !== '' && file_exists($keyPath);
-        $secretOk = $secret !== '' || ($secretPath !== '' && file_exists($secretPath));
-        $dllOk = extension_loaded('com_dotnet');
+        $vat = preg_replace('/\\D+/', '', (string) ($state['company_tax_number'] ?? ''));
 
         $checks = [
-            'الرقم الضريبي' => $vatOk,
-            'الشهادة' => $certOk,
-            'المفتاح الخاص' => $keyOk,
-            'Secret' => $secretOk,
-            'COM DLL' => $dllOk,
+            'الرقم الضريبي للمنشأة' => strlen($vat) === 15,
+            'PHP COM extension' => extension_loaded('com_dotnet'),
         ];
+
+        foreach ([
+            'zatca_test' => 'البيئة التجريبية',
+            'zatca_production' => 'البيئة الفعلية',
+        ] as $prefix => $label) {
+            $certPath = trim((string) ($state[$prefix . '_cert_path'] ?? ''));
+            $keyPath = trim((string) ($state[$prefix . '_key_path'] ?? ''));
+            $secretPath = trim((string) ($state[$prefix . '_secret_path'] ?? ''));
+            $secret = trim((string) ($state[$prefix . '_secret'] ?? ''));
+            $rootPath = trim((string) ($state[$prefix . '_root_path'] ?? ''));
+
+            $checks[$label . ' — الشهادة'] = $certPath !== '' && file_exists($certPath);
+            $checks[$label . ' — المفتاح الخاص'] = $keyPath !== '' && file_exists($keyPath);
+            $checks[$label . ' — Secret'] = $secret !== '' || ($secretPath !== '' && file_exists($secretPath));
+            $checks[$label . ' — مجلد النتائج'] = $rootPath !== '';
+        }
+
+        $testMode = (string) ($state['zatca_test_mode'] ?? '');
+        $checks['نمط الربط التجريبي'] = in_array($testMode, ['simulation', 'compliance'], true);
 
         $failed = collect($checks)
             ->filter(fn (bool $ok) => !$ok)
@@ -325,8 +418,8 @@ class SettingsPage extends Page implements HasForms
 
         if ($failed->isEmpty()) {
             Notification::make()
-                ->title('إعدادات زاتكا الأساسية جاهزة')
-                ->body('تم التحقق من الرقم الضريبي والملفات وCOM DLL على السيرفر الحالي.')
+                ->title('إعدادات زاتكا للبيئتين جاهزة مبدئيًا')
+                ->body('تم التحقق من الرقم الضريبي وملفات الشهادة والمفتاح وبيانات المصادقة ومجلد النتائج في البيئتين.')
                 ->success()
                 ->send();
 
@@ -365,11 +458,10 @@ class SettingsPage extends Page implements HasForms
             'OM' => 'عُمان',
         ];
 
-        $mode = $state['zatca_sending_mode'] ?? 'simulation';
+        $mode = (string) ($state['zatca_test_mode'] ?? 'simulation');
         $modeLabels = [
-            'simulation' => 'Simulation',
-            'compliance' => 'Compliance',
-            'production' => 'Production',
+            'simulation' => 'Test — Simulation',
+            'compliance' => 'Test — Compliance',
         ];
 
         return [
@@ -389,16 +481,39 @@ class SettingsPage extends Page implements HasForms
 
     public function getZatcaReadiness(): int
     {
+        $test = $this->getEnvironmentReadiness('test');
+        $production = $this->getEnvironmentReadiness('production');
+
+        return (int) round(($test + $production) / 2);
+    }
+
+    protected function getEnvironmentReadiness(string $environment): int
+    {
         $state = $this->data ?? [];
-        $vat = preg_replace('/\D+/', '', (string) ($state['company_tax_number'] ?? ''));
+        $prefix = $environment === 'test' ? 'zatca_test' : 'zatca_production';
+        $vat = preg_replace('/\\D+/', '', (string) ($state['company_tax_number'] ?? ''));
+        $certPath = trim((string) ($state[$prefix . '_cert_path'] ?? Setting::get($prefix . '_cert_path', '')));
+        $keyPath = trim((string) ($state[$prefix . '_key_path'] ?? Setting::get($prefix . '_key_path', '')));
+        $secretPath = trim((string) ($state[$prefix . '_secret_path'] ?? Setting::get($prefix . '_secret_path', '')));
+        $secret = trim((string) ($state[$prefix . '_secret'] ?? Setting::get($prefix . '_secret', '')));
+        $rootPath = trim((string) ($state[$prefix . '_root_path'] ?? Setting::get($prefix . '_root_path', '')));
 
         $checks = [
             strlen($vat) === 15,
-            filled($state['zatca_cert_path'] ?? null) && file_exists((string) $state['zatca_cert_path']),
-            filled($state['zatca_key_path'] ?? null) && file_exists((string) $state['zatca_key_path']),
-            filled($state['zatca_secret'] ?? null) || (filled($state['zatca_secret_path'] ?? null) && file_exists((string) $state['zatca_secret_path'])),
+            $certPath !== '' && file_exists($certPath),
+            $keyPath !== '' && file_exists($keyPath),
+            $secret !== '' || ($secretPath !== '' && file_exists($secretPath)),
+            $rootPath !== '',
             extension_loaded('com_dotnet'),
         ];
+
+        if ($environment === 'test') {
+            $checks[] = in_array(
+                (string) ($state['zatca_test_mode'] ?? Setting::get('zatca_test_mode', 'simulation')),
+                ['simulation', 'compliance'],
+                true
+            );
+        }
 
         return (int) round((collect($checks)->filter()->count() / count($checks)) * 100);
     }
@@ -406,14 +521,13 @@ class SettingsPage extends Page implements HasForms
     public function getZatcaBrandCard(): HtmlString
     {
         $state = $this->data ?? [];
-        $mode = (string) ($state['zatca_sending_mode'] ?? 'simulation');
-        $labels = [
+        $testMode = (string) ($state['zatca_test_mode'] ?? 'simulation');
+        $modeLabels = [
             'simulation' => 'Simulation',
             'compliance' => 'Compliance',
-            'production' => 'Production',
         ];
-        $label = $labels[$mode] ?? ucfirst($mode);
-        $readiness = $this->getZatcaReadiness();
+        $testReadiness = $this->getEnvironmentReadiness('test');
+        $productionReadiness = $this->getEnvironmentReadiness('production');
         $logo = 'https://www.zatca.gov.sa/ar/MediaCenter/AuthorityIdentity/PublishingImages/dark-bg.png';
 
         return new HtmlString(
@@ -421,8 +535,12 @@ class SettingsPage extends Page implements HasForms
             . '<div class="zatca-brand-copy">'
             . '<div class="zatca-brand-kicker">E-INVOICING INTEGRATION</div>'
             . '<div class="zatca-brand-title">تكامل هيئة الزكاة والضريبة والجمارك</div>'
-            . '<div class="zatca-brand-sub">إدارة بيئة الإرسال، بيانات المصادقة، الشهادة والمفتاح الخاص من نقطة واحدة.</div>'
-            . '<div class="zatca-brand-meta"><span class="zatca-env-tag">' . e($label) . '</span><span class="zatca-readiness-tag">جاهزية الربط ' . $readiness . '%</span></div>'
+            . '<div class="zatca-brand-sub">إعدادات مستقلة لكل من البيئة التجريبية والبيئة الفعلية. اختر البيئة المطلوبة من شاشة الفواتير غير المرسلة.</div>'
+            . '<div class="zatca-brand-meta">'
+            . '<span class="zatca-env-tag">Test: ' . e($modeLabels[$testMode] ?? ucfirst($testMode)) . '</span>'
+            . '<span class="zatca-readiness-tag">جاهزية التجريبي ' . $testReadiness . '%</span>'
+            . '<span class="zatca-readiness-tag">جاهزية الفعلي ' . $productionReadiness . '%</span>'
+            . '</div>'
             . '</div>'
             . '<div class="zatca-logo-wrap">'
             . '<img src="' . e($logo) . '" alt="ZATCA" class="zatca-official-logo" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\';">'
@@ -435,30 +553,52 @@ class SettingsPage extends Page implements HasForms
     public function getZatcaStatusBoard(): HtmlString
     {
         $state = $this->data ?? [];
-        $vat = preg_replace('/\D+/', '', (string) ($state['company_tax_number'] ?? ''));
-        $certPath = trim((string) ($state['zatca_cert_path'] ?? ''));
-        $keyPath = trim((string) ($state['zatca_key_path'] ?? ''));
-        $secretPath = trim((string) ($state['zatca_secret_path'] ?? ''));
-        $secret = trim((string) ($state['zatca_secret'] ?? ''));
-
-        $items = [
-            ['الرقم الضريبي', strlen($vat) === 15, strlen($vat) === 15 ? '15 رقم' : 'يحتاج مراجعة'],
-            ['Certificate', $certPath !== '' && file_exists($certPath), $certPath !== '' && file_exists($certPath) ? basename($certPath) : 'غير جاهز'],
-            ['Private Key', $keyPath !== '' && file_exists($keyPath), $keyPath !== '' && file_exists($keyPath) ? basename($keyPath) : 'غير جاهز'],
-            ['Secret', $secret !== '' || ($secretPath !== '' && file_exists($secretPath)), $secret !== '' ? 'Direct Secret' : (($secretPath !== '' && file_exists($secretPath)) ? basename($secretPath) : 'غير جاهز')],
-            ['COM DLL', extension_loaded('com_dotnet'), extension_loaded('com_dotnet') ? 'Enabled' : 'Disabled'],
+        $vat = preg_replace('/\\D+/', '', (string) ($state['company_tax_number'] ?? ''));
+        $profiles = [
+            'zatca_test' => 'البيئة التجريبية',
+            'zatca_production' => 'البيئة الفعلية (Production)',
         ];
 
-        $html = '<div class="zatca-status-grid">';
-        foreach ($items as [$name, $ok, $detail]) {
-            $class = $ok ? 'ready' : 'missing';
-            $status = $ok ? 'جاهز' : 'مراجعة';
-            $html .= '<div class="zatca-status-item ' . $class . '">'
-                . '<div class="zatca-status-top"><span class="zatca-status-dot"></span><span class="zatca-status-state">' . $status . '</span></div>'
-                . '<div class="zatca-status-name">' . e($name) . '</div>'
-                . '<div class="zatca-status-detail">' . e($detail) . '</div>'
-                . '</div>';
+        $html = '<div class="zatca-environments-status">';
+
+        foreach ($profiles as $prefix => $title) {
+            $certPath = trim((string) ($state[$prefix . '_cert_path'] ?? ''));
+            $keyPath = trim((string) ($state[$prefix . '_key_path'] ?? ''));
+            $secretPath = trim((string) ($state[$prefix . '_secret_path'] ?? ''));
+            $secret = trim((string) ($state[$prefix . '_secret'] ?? ''));
+            $rootPath = trim((string) ($state[$prefix . '_root_path'] ?? ''));
+            $items = [
+                ['الرقم الضريبي', strlen($vat) === 15, strlen($vat) === 15 ? '15 رقم' : 'يحتاج مراجعة'],
+                ['Certificate', $certPath !== '' && file_exists($certPath), $certPath !== '' && file_exists($certPath) ? basename($certPath) : 'غير جاهز'],
+                ['Private Key', $keyPath !== '' && file_exists($keyPath), $keyPath !== '' && file_exists($keyPath) ? basename($keyPath) : 'غير جاهز'],
+                ['Secret', $secret !== '' || ($secretPath !== '' && file_exists($secretPath)), $secret !== '' ? 'Secret مباشر' : (($secretPath !== '' && file_exists($secretPath)) ? basename($secretPath) : 'غير جاهز')],
+                ['مجلد النتائج', $rootPath !== '', $rootPath !== '' ? $rootPath : 'غير محدد'],
+                ['COM DLL', extension_loaded('com_dotnet'), extension_loaded('com_dotnet') ? 'Enabled' : 'Disabled'],
+            ];
+
+            if ($prefix === 'zatca_test') {
+                $mode = (string) ($state['zatca_test_mode'] ?? 'simulation');
+                $modeReady = in_array($mode, ['simulation', 'compliance'], true);
+                $items[] = ['نمط الربط', $modeReady, $modeReady ? strtoupper($mode) : 'غير محدد'];
+            }
+
+            $html .= '<div class="zatca-environment-status-section">'
+                . '<h4 class="zatca-environment-status-title">' . e($title) . '</h4>'
+                . '<div class="zatca-status-grid">';
+
+            foreach ($items as [$name, $ok, $detail]) {
+                $class = $ok ? 'ready' : 'missing';
+                $statusLabel = $ok ? 'جاهز' : 'مراجعة';
+                $html .= '<div class="zatca-status-item ' . $class . '">'
+                    . '<div class="zatca-status-top"><span class="zatca-status-dot"></span><span class="zatca-status-state">' . $statusLabel . '</span></div>'
+                    . '<div class="zatca-status-name">' . e($name) . '</div>'
+                    . '<div class="zatca-status-detail">' . e($detail) . '</div>'
+                    . '</div>';
+            }
+
+            $html .= '</div></div>';
         }
+
         $html .= '</div>';
 
         return new HtmlString($html);

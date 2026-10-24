@@ -22,6 +22,7 @@ use Filament\Actions\Action;
 use App\Services\ZatcaService;
 use App\Services\AccountingReversalService;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use App\Filament\Traits\HasResourcePermissions;
 
@@ -70,31 +71,62 @@ class InvoiceResource extends Resource
 
             // ══ زاتكا — الديمو السعودي ══════════════════════════
             Action::make('submit_zatca')
-                ->label(fn($record) => $record->zatca_sent ? 'إعادة إرسال لزاتكا' : 'إرسال إلى زاتكا')
+                ->label('إرسال إلى زاتكا')
                 ->icon('heroicon-o-paper-airplane')
-                ->color(fn($record) => $record->zatca_sent ? 'info' : 'primary')
+                ->color('primary')
                 ->requiresConfirmation()
                 ->modalHeading('إرسال الفاتورة إلى زاتكا')
-                ->modalDescription('سيتم إرسال الفاتورة إلى منظومة زاتكا السعودية. تأكد من صحة البيانات الضريبية.')
-                ->modalSubmitActionLabel('إرسال')
-                ->action(function ($record) {
-                    $result = app(ZatcaService::class)->submitInvoice($record);
+                ->modalDescription('اختيار Test يستخدم بيانات الاختبار. اختيار Production يستهدف البيئة الفعلية، لكنه يظل محظورًا ما لم يتم تفعيل السماح به صراحةً على خادم الإنتاج.')
+                ->modalSubmitActionLabel('تأكيد الإرسال')
+                ->form([
+                    Select::make('environment')
+                        ->label('بيئة الإرسال')
+                        ->options([
+                            'test' => 'Test — بيئة الاختبار',
+                            'production' => 'Production — البيئة الفعلية',
+                        ])
+                        ->default('test')
+                        ->helperText('الإرسال إلى Production معطّل افتراضيًا. لا تفعّله على Staging.')
+                        ->required(),
+                ])
+                ->action(function ($record, array $data) {
+                    $environment = (string) ($data['environment'] ?? 'test');
+                    $result = app(ZatcaService::class)->submitInvoice($record, $environment);
+                    $environmentLabel = $environment === 'production' ? 'Production' : 'Test';
 
-                    if ($result['success']) {
-                        \Filament\Notifications\Notification::make()
-                            ->title('تم إرسال الفاتورة إلى زاتكا')
-                            ->body('UUID: ' . $result['uuid'] . ' | بيئة: ' . $result['environment'])
+                    if (!empty($result['already_sent'])) {
+                        Notification::make()
+                            ->title('الفاتورة مرسلة بالفعل')
+                            ->body(($result['error'] ?? 'تم الإرسال من قبل') . ' — البيئة: ' . $environmentLabel)
+                            ->warning()
+                            ->send();
+                        return;
+                    }
+
+                    if (!empty($result['in_progress'])) {
+                        Notification::make()
+                            ->title('الإرسال قيد التنفيذ')
+                            ->body(($result['error'] ?? 'هناك محاولة إرسال قائمة') . ' — البيئة: ' . $environmentLabel)
+                            ->warning()
+                            ->send();
+                        return;
+                    }
+
+                    if (!empty($result['success'])) {
+                        Notification::make()
+                            ->title('تم قبول إرسال الفاتورة من زاتكا')
+                            ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | البيئة: ' . $environmentLabel)
                             ->success()
                             ->send();
                     } else {
-                        \Filament\Notifications\Notification::make()
+                        Notification::make()
                             ->title('فشل إرسال الفاتورة إلى زاتكا')
-                            ->body($result['error'])
+                            ->body(($result['error'] ?? 'خطأ غير معروف') . ' | البيئة: ' . $environmentLabel)
                             ->danger()
                             ->send();
                     }
                 })
-                ->visible(fn($record) =>
+                ->visible(fn ($record) =>
                     in_array($record->type, ['sale'], true)
                     && in_array($record->status, ['confirmed', 'partial', 'paid'], true)
                 ),

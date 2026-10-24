@@ -4,32 +4,145 @@ namespace App\Services;
 
 use App\Models\Invoice;
 use App\Models\Setting;
+use App\Models\ZatcaInvoiceSubmission;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ZatcaService
 {
-    public function submitInvoice(Invoice $invoice): array
+    public function submitInvoice(Invoice $invoice, string $environment = 'test'): array
     {
-        $uuid        = null;
+        $uuid = null;
         $invoiceHash = null;
-        $environment = Setting::get('zatca_sending_mode', 'simulation');
-        // ⚠️ القيمة الفعلية المخزنة في TBL_COM_INFO.ZatcaSendingMode بالنظام الشغّال = 0 لبيئة Simulation
-        // (تم التأكد من قاعدة بيانات الأكسس الحقيقية وليس افتراضاً)
-        $sendingMode = match ($environment) {
-            'compliance' => 0,
-            'simulation' => 0, // ← القيمة الحقيقية المستخدمة فعلياً
-            'production' => 2,
-            default      => 0,
-        };
-
-        $rootPath = Setting::get('zatca_root_path', 'D:\ZatcaIntegration');
-        if (!is_dir($rootPath)) {
-            @mkdir($rootPath, 0777, true);
-        }
-
+        $statusCode = null;
+        $submission = null;
+        $sendingModeName = null;
+        $rootPath = null;
         $step = 'init';
 
         try {
+            $environment = strtolower(trim($environment));
+            if (!in_array($environment, ['test', 'production'], true)) {
+                throw new \InvalidArgumentException('بيئة زاتكا غير صحيحة. اختر test أو production.');
+            }
+
+            // Production sending is disabled by default, particularly on Staging.
+            // Enable it deliberately through ZATCA_ALLOW_PRODUCTION_SENDING=true
+            // only on the real production server after validating its credentials.
+            if ($environment === 'production' && !config('services.zatca.allow_production_sending', false)) {
+                throw new \RuntimeException(
+                    'الإرسال إلى Production معطل افتراضيًا. اختبر على Test، ولا تفعّل الإرسال الحقيقي إلا من إعدادات خادم الإنتاج.'
+                );
+            }
+
+            // Test always uses the separately selected test mode. Production always
+            // uses the production mode; there is no implicit production fallback.
+            $sendingModeName = $environment === 'production'
+                ? 'production'
+                : strtolower(trim((string) Setting::get('zatca_test_mode', 'simulation')));
+
+            if ($environment === 'test'
+                && !in_array($sendingModeName, ['simulation', 'compliance'], true)) {
+                throw new \RuntimeException('نمط بيئة الاختبار يجب أن يكون simulation أو compliance.');
+            }
+
+            // Confirmed mapping from the existing COM integration database:
+            // simulation = 0, compliance = 0, production = 2.
+            $sendingMode = match ($sendingModeName) {
+                'simulation', 'compliance' => 0,
+                'production' => 2,
+                default => throw new \RuntimeException('نمط إرسال زاتكا غير مدعوم.'),
+            };
+
+            // Claim this invoice/environment before making any external API call.
+            // The invoice row lock serializes simultaneous clicks for the same invoice.
+            $claim = DB::transaction(function () use ($invoice, $environment, $sendingModeName) {
+                $lockedInvoice = DB::table('invoices')
+                    ->where('id', $invoice->getKey())
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$lockedInvoice) {
+                    throw new \RuntimeException('الفاتورة غير موجودة.');
+                }
+
+                $current = ZatcaInvoiceSubmission::query()
+                    ->where('invoice_id', $invoice->getKey())
+                    ->where('environment', $environment)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_SENT) {
+                    return ['state' => 'sent', 'submission' => $current];
+                }
+
+                if (
+                    $current
+                    && $current->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
+                    && $current->last_attempt_at
+                    && $current->last_attempt_at->gt(now()->subMinutes(30))
+                ) {
+                    return ['state' => 'processing', 'submission' => $current];
+                }
+
+                // A processing record older than 30 minutes is treated as stale,
+                // so a crashed request cannot permanently block future retries.
+                $current ??= new ZatcaInvoiceSubmission();
+                $current->invoice_id = $invoice->getKey();
+                $current->environment = $environment;
+                $current->status = ZatcaInvoiceSubmission::STATUS_PROCESSING;
+                $current->attempts = ((int) $current->attempts) + 1;
+                $current->status_code = null;
+                $current->error = null;
+                $current->response = null;
+                $current->last_attempt_at = now();
+                $current->sent_at = null;
+                $current->sending_mode = $sendingModeName;
+                $current->save();
+
+                return ['state' => 'claimed', 'submission' => $current];
+            });
+
+            if ($claim['state'] === 'sent') {
+                return [
+                    'success' => false,
+                    'already_sent' => true,
+                    'in_progress' => false,
+                    'status' => 'sent',
+                    'status_code' => $claim['submission']->status_code,
+                    'uuid' => $claim['submission']->uuid,
+                    'invoice_hash' => $claim['submission']->invoice_hash,
+                    'environment' => $environment,
+                    'sending_mode' => $sendingModeName,
+                    'error' => 'تم إرسال الفاتورة بالفعل إلى هذه البيئة. لن نكرر الإرسال تلقائيًا.',
+                    'raw_response' => $claim['submission']->response,
+                ];
+            }
+
+            if ($claim['state'] === 'processing') {
+                return [
+                    'success' => false,
+                    'already_sent' => false,
+                    'in_progress' => true,
+                    'status' => 'processing',
+                    'status_code' => $claim['submission']->status_code,
+                    'uuid' => $claim['submission']->uuid,
+                    'invoice_hash' => $claim['submission']->invoice_hash,
+                    'environment' => $environment,
+                    'sending_mode' => $sendingModeName,
+                    'error' => 'يوجد إرسال جارٍ لهذه الفاتورة في البيئة نفسها. انتظر حتى ينتهي قبل المحاولة مرة أخرى.',
+                    'raw_response' => null,
+                ];
+            }
+
+            $submission = $claim['submission'];
+            $config = $this->getEnvironmentConfig($environment, $sendingModeName);
+            $rootPath = $config['root_path'];
+
+            if (!is_dir($rootPath) && !@mkdir($rootPath, 0775, true) && !is_dir($rootPath)) {
+                throw new \RuntimeException('تعذر إنشاء مجلد ملفات زاتكا: ' . $rootPath);
+            }
+
             if (!extension_loaded('com_dotnet')) {
                 throw new \RuntimeException('PHP COM extension غير مفعّل.');
             }
@@ -61,7 +174,7 @@ class ZatcaService
 
             $step = '2d-pih';
             Log::info("ZATCA STEP: {$step}");
-            $pih = $this->getPreviousInvoiceHash($invoice);
+            $pih = $this->getPreviousInvoiceHash($invoice, $environment);
             $inv->AdditionalDocumentReferencePIH->EmbeddedDocumentBinaryObject = $pih;
             Log::info("ZATCA STEP OK: {$step}");
 
@@ -175,9 +288,9 @@ class ZatcaService
 
             $step = '6-certificate';
             Log::info("ZATCA STEP: {$step}");
-            $certPath   = Setting::get('zatca_cert_path', '');
-            $keyPath    = Setting::get('zatca_key_path', '');
-            $secretPath = Setting::get('zatca_secret_path', '');
+            $certPath   = $config['cert_path'];
+            $keyPath    = $config['key_path'];
+            $secretPath = $config['secret_path'];
 
             if (!$certPath || !file_exists($certPath)) {
                 throw new \RuntimeException('ملف الشهادة (cert.pem) غير موجود. راجع إعدادات النظام → زاتكا');
@@ -189,15 +302,15 @@ class ZatcaService
             $inv->CSIDInfo->CertPem     = file_get_contents($certPath);
             $inv->CSIDInfo->PrivateKey  = file_get_contents($keyPath);
             $secretKey = $secretPath && file_exists($secretPath)
-                ? trim(file_get_contents($secretPath))
-                : Setting::get('zatca_secret', '');
+                ? trim((string) file_get_contents($secretPath))
+                : (string) $config['secret'];
 
+            // Never log Secret, private-key content, or authentication tokens.
             Log::info("ZATCA CERT CHECK", [
+                'environment'     => $environment,
                 'cert_len'        => strlen($inv->CSIDInfo->CertPem),
-                'cert_starts'     => substr($inv->CSIDInfo->CertPem, 0, 40),
                 'key_len'         => strlen($inv->CSIDInfo->PrivateKey),
-                'secret_len'      => strlen($secretKey),
-                'secret_preview'  => substr($secretKey, 0, 6) . '...',
+                'secret_configured' => $secretKey !== '',
                 'tax_number_used' => Setting::get('company_tax_number', ''),
                 'cr_used'         => Setting::get('company_cr', ''),
             ]);
@@ -266,16 +379,13 @@ class ZatcaService
                 $rawError = $safeGet($tokenResponse, 'ErrorMessage');
 
                 Log::info("ZATCA COMPLIANCE CSID RESPONSE", [
-                    'ErrorMessage_raw'      => $rawError,
-                    'ErrorMessage_len'      => $rawError !== null ? strlen($rawError) : null,
-                    'ErrorMessage_hex'      => $rawError !== null ? bin2hex(substr($rawError, 0, 60)) : null,
-                    'ErrorMessage_win1256'  => $rawError !== null && $rawError !== '' ? @mb_convert_encoding($rawError, 'UTF-8', 'Windows-1256') : null,
-                    'BinarySecurityToken'   => substr($safeGet($tokenResponse, 'BinarySecurityToken') ?? '', 0, 30) . '...',
-                    'Secret'                => substr($safeGet($tokenResponse, 'Secret') ?? '', 0, 10) . '...',
-                    'RequestID'             => $safeGet($tokenResponse, 'RequestID'),
-                    'DispositionMessage'    => $safeGet($tokenResponse, 'DispositionMessage'),
-                    'IsSuccess'             => $safeGet($tokenResponse, 'IsSuccess'),
-                    'StatusCode'            => $safeGet($tokenResponse, 'StatusCode'),
+                    'has_error'             => !empty($rawError),
+                    'error_message'         => $rawError,
+                    'request_id'            => $safeGet($tokenResponse, 'RequestID'),
+                    'disposition_message'   => $safeGet($tokenResponse, 'DispositionMessage'),
+                    'is_success'             => $safeGet($tokenResponse, 'IsSuccess'),
+                    'status_code'            => $safeGet($tokenResponse, 'StatusCode'),
+                    // Authentication token and Secret intentionally omitted.
                 ]);
 
                 if (!empty($rawError)) {
@@ -329,68 +439,150 @@ class ZatcaService
 
             $success = $isSuccess && $statusCode === 202;
 
-            if ($success) {
-                $invoice->update([
-                    'zatca_sent'         => true,
-                    'zatca_environment'  => $environment,
-                    'zatca_status_code'  => $statusCode,
-                    'zatca_uuid'         => $uuid,
-                    'zatca_invoice_hash' => $invoiceHash,
-                    'zatca_error'        => null,
-                    'zatca_sent_at'      => now(),
-                    'zatca_response'     => "Status: {$statusCode}",
-                ]);
-            } else {
-                $invoice->update([
-                    'zatca_sent'        => false,
-                    'zatca_status_code' => $statusCode,
-                    'zatca_error'       => $errorMsg,
-                    'zatca_response'    => "Status: {$statusCode}",
-                ]);
-            }
+            $responseText = json_encode([
+                'status_code' => $statusCode,
+                'is_success' => $isSuccess,
+                'error' => $errorMsg,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            $submission->update([
+                'status' => $success
+                    ? ZatcaInvoiceSubmission::STATUS_SENT
+                    : ZatcaInvoiceSubmission::STATUS_FAILED,
+                'status_code' => $statusCode,
+                'uuid' => $uuid,
+                'invoice_hash' => $invoiceHash,
+                'error' => $errorMsg,
+                'response' => $responseText,
+                'sent_at' => $success ? now() : null,
+                'sending_mode' => $sendingModeName,
+            ]);
 
             return [
                 'success'      => $success,
+                'already_sent' => false,
+                'in_progress'  => false,
+                'status'       => $success ? 'sent' : 'failed',
                 'status_code'  => $statusCode,
                 'uuid'         => $uuid,
                 'invoice_hash' => $invoiceHash,
                 'environment'  => $environment,
+                'sending_mode' => $sendingModeName,
                 'error'        => $errorMsg,
-                'raw_response' => "Status: {$statusCode}",
+                'raw_response' => $responseText,
             ];
 
         } catch (\Throwable $e) {
-            $errorMsg = $e->getMessage();
+            $errorMsg = "[{$step}] " . $e->getMessage();
             Log::error("ZATCA FAILED AT STEP: {$step}", [
                 'invoice_id' => $invoice->id,
-                'error'      => $errorMsg,
-                'trace'      => $e->getTraceAsString(),
+                'environment' => $environment,
+                'sending_mode' => $sendingModeName,
+                'error' => $e->getMessage(),
             ]);
-            $invoice->update(['zatca_sent' => false, 'zatca_error' => "[{$step}] {$errorMsg}"]);
+
+            if ($submission instanceof ZatcaInvoiceSubmission) {
+                try {
+                    $submission->update([
+                        'status' => ZatcaInvoiceSubmission::STATUS_FAILED,
+                        'status_code' => $statusCode,
+                        'uuid' => $uuid,
+                        'invoice_hash' => $invoiceHash,
+                        'error' => $errorMsg,
+                        'response' => null,
+                        'sent_at' => null,
+                        'sending_mode' => $sendingModeName,
+                    ]);
+                } catch (\Throwable $persistError) {
+                    Log::error('ZATCA submission failure could not be saved', [
+                        'invoice_id' => $invoice->id,
+                        'environment' => $environment,
+                        'error' => $persistError->getMessage(),
+                    ]);
+                }
+            }
+
             return [
                 'success'      => false,
-                'status_code'  => null,
+                'already_sent' => false,
+                'in_progress'  => false,
+                'status'       => 'failed',
+                'status_code'  => $statusCode,
                 'uuid'         => $uuid,
                 'invoice_hash' => $invoiceHash,
                 'environment'  => $environment,
-                'error'        => "[{$step}] {$errorMsg}",
+                'sending_mode' => $sendingModeName,
+                'error'        => $errorMsg,
                 'raw_response' => null,
             ];
         }
     }
 
-    protected function getPreviousInvoiceHash(Invoice $current): string
+    /**
+     * Resolve an isolated environment profile. Legacy credentials are read only
+     * when their old sending mode belongs to the same environment.
+     */
+    protected function getEnvironmentConfig(string $environment, string $sendingModeName): array
+    {
+        $prefix = $environment === 'test' ? 'zatca_test' : 'zatca_production';
+        $legacyMode = strtolower(trim((string) Setting::get('zatca_sending_mode', 'simulation')));
+        $legacyMatchesEnvironment = $environment === 'production'
+            ? $legacyMode === 'production'
+            : in_array($legacyMode, ['simulation', 'compliance'], true);
+
+        $read = function (string $suffix, ?string $legacyKey = null, string $default = '') use (
+            $prefix,
+            $legacyMatchesEnvironment
+        ): string {
+            $key = $prefix . '_' . $suffix;
+
+            // If the new setting exists, honor it even when explicitly blank.
+            if (Setting::where('key', $key)->exists()) {
+                $value = trim((string) Setting::get($key, ''));
+                return $value !== '' ? $value : $default;
+            }
+
+            if ($legacyMatchesEnvironment && $legacyKey !== null) {
+                $legacyValue = trim((string) Setting::get($legacyKey, ''));
+                if ($legacyValue !== '') {
+                    return $legacyValue;
+                }
+            }
+
+            return $default;
+        };
+
+        return [
+            'sending_mode' => $sendingModeName,
+            'cert_path' => $read('cert_path', 'zatca_cert_path'),
+            'key_path' => $read('key_path', 'zatca_key_path'),
+            'secret' => $read('secret', 'zatca_secret'),
+            'secret_path' => $read('secret_path', 'zatca_secret_path'),
+            'root_path' => $read(
+                'root_path',
+                'zatca_root_path',
+                $environment === 'test'
+                    ? (trim((string) Setting::get('zatca_root_path', '')) ?: 'D:\\ZatcaIntegration')
+                    : storage_path('app/zatca/production')
+            ),
+        ];
+    }
+
+    protected function getPreviousInvoiceHash(Invoice $current, string $environment): string
     {
         $initial = 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzIzOWRkNGU5MWI0NjcyOWQ3M2EyN2ZiNTdlOQ==';
 
-        $previous = Invoice::whereNotNull('zatca_invoice_hash')
-            ->where('zatca_sent', true)
-            ->where('id', '<', $current->id)
-            ->where('type', $current->type)
-            ->orderByDesc('id')
-            ->first();
+        $previous = DB::table('zatca_invoice_submissions as submissions')
+            ->join('invoices', 'invoices.id', '=', 'submissions.invoice_id')
+            ->where('submissions.environment', $environment)
+            ->where('submissions.status', ZatcaInvoiceSubmission::STATUS_SENT)
+            ->whereNotNull('submissions.invoice_hash')
+            ->where('invoices.id', '<', $current->id)
+            ->where('invoices.type', $current->type)
+            ->orderByDesc('invoices.id')
+            ->value('submissions.invoice_hash');
 
-        return $previous?->zatca_invoice_hash ?? $initial;
+        return $previous ?: $initial;
     }
 
     public function smokeTest(): array
@@ -413,12 +605,22 @@ class ZatcaService
                 $results['com'][$label] = '❌ ' . $e->getMessage();
             }
         }
-        $results['settings'] = [
-            'cert_path'   => Setting::get('zatca_cert_path'),
-            'cert_exists' => file_exists(Setting::get('zatca_cert_path', '') ?: ''),
-            'key_path'    => Setting::get('zatca_key_path'),
-            'key_exists'  => file_exists(Setting::get('zatca_key_path', '') ?: ''),
-        ];
+        foreach (['test', 'production'] as $environment) {
+            $mode = $environment === 'production'
+                ? 'production'
+                : strtolower(trim((string) Setting::get('zatca_test_mode', 'simulation')));
+            $config = $this->getEnvironmentConfig($environment, $mode);
+            $results['environments'][$environment] = [
+                'sending_mode' => $mode,
+                'cert_path' => $config['cert_path'],
+                'cert_exists' => $config['cert_path'] !== '' && file_exists($config['cert_path']),
+                'key_path' => $config['key_path'],
+                'key_exists' => $config['key_path'] !== '' && file_exists($config['key_path']),
+                'secret_configured' => $config['secret'] !== ''
+                    || ($config['secret_path'] !== '' && file_exists($config['secret_path'])),
+                'root_path' => $config['root_path'],
+            ];
+        }
         return $results;
     }
 }
