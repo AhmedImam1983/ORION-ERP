@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    // Real ZATCA Production sending is opt-in and must stay disabled on Staging.
+    'zatca' => [
+        'allow_production_sending' => env('ZATCA_ALLOW_PRODUCTION_SENDING', false),
+    ],
+
 ];
