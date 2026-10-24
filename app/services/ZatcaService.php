@@ -35,6 +35,20 @@ class ZatcaService
                 );
             }
 
+            // Production is a privileged operation. UI visibility is not an authorization boundary.
+            if ($environment === 'production') {
+                $user = auth()->user();
+                if (!$user || !$user->hasAnyRole(['super_admin', 'admin'])) {
+                    throw new \RuntimeException('ليس لديك صلاحية الإرسال إلى بيئة Production. يلزم مدير النظام أو المسؤول الأعلى.');
+                }
+            }
+
+            // Validate before claiming an attempt, so invalid invoices do not create misleading submission rows.
+            $this->assertEligibleInvoiceState((string) $invoice->type, (string) $invoice->status);
+            if (!$invoice->exists || !$invoice->getKey()) {
+                throw new \RuntimeException('لا يمكن إرسال فاتورة غير محفوظة في قاعدة البيانات.');
+            }
+
             // Test always uses the separately selected test mode. Production always
             // uses the production mode; there is no implicit production fallback.
             $sendingModeName = $environment === 'production'
@@ -65,6 +79,13 @@ class ZatcaService
                 if (!$lockedInvoice) {
                     throw new \RuntimeException('الفاتورة غير موجودة.');
                 }
+
+                // Revalidate authoritative database state while the invoice row is locked.
+                // The model passed to this method may have been loaded before cancellation/editing.
+                $this->assertEligibleInvoiceState(
+                    (string) $lockedInvoice->type,
+                    (string) $lockedInvoice->status
+                );
 
                 $current = ZatcaInvoiceSubmission::query()
                     ->where('invoice_id', $invoice->getKey())
@@ -515,6 +536,17 @@ class ZatcaService
                 'error'        => $errorMsg,
                 'raw_response' => null,
             ];
+        }
+    }
+
+    private function assertEligibleInvoiceState(string $type, string $status): void
+    {
+        if ($type !== 'sale') {
+            throw new \RuntimeException('تكامل زاتكا متاح لفواتير البيع فقط.');
+        }
+
+        if (!in_array($status, ['confirmed', 'partial', 'paid'], true)) {
+            throw new \RuntimeException("لا يمكن إرسال فاتورة بالحالة {$status} إلى زاتكا.");
         }
     }
 
