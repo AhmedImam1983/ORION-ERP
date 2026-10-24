@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Invoice;
 use App\Models\Setting;
 use App\Models\ZatcaInvoiceSubmission;
+use App\Models\ZatcaSubmissionReconciliation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -114,6 +115,7 @@ class ZatcaService
                 $legacyUnknown = ZatcaInvoiceSubmission::query()
                     ->where('invoice_id', $invoice->getKey())
                     ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+                    ->where('status', '!=', ZatcaInvoiceSubmission::STATUS_RECONCILED)
                     ->lockForUpdate()
                     ->first();
 
@@ -705,6 +707,7 @@ class ZatcaService
             $legacyUnknown = ZatcaInvoiceSubmission::query()
                 ->where('invoice_id', $invoiceId)
                 ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+                ->where('status', '!=', ZatcaInvoiceSubmission::STATUS_RECONCILED)
                 ->lockForUpdate()
                 ->first();
 
@@ -748,6 +751,239 @@ class ZatcaService
             $current->save();
 
             return ['status' => 'uncertain', 'error' => $current->error];
+        });
+    }
+
+    /**
+     * Record an audited human review of a ZATCA outcome that cannot safely be retried.
+     * This method never calls ZATCA. Accepted/rejected decisions require an official evidence source.
+     */
+    public function recordManualReconciliation(
+        int $submissionId,
+        string $outcome,
+        string $evidenceType,
+        string $evidenceReference,
+        string $notes,
+        ?string $targetEnvironment = null
+    ): array {
+        $actor = auth()->user();
+        if (!$actor || !$actor->hasAnyRole(['super_admin', 'admin']) || !$actor->getAuthIdentifier()) {
+            throw new \RuntimeException('توثيق تسوية زاتكا متاح لمدير النظام أو المسؤول الأعلى فقط.');
+        }
+
+        $outcome = strtolower(trim($outcome));
+        $evidenceType = strtolower(trim($evidenceType));
+        $evidenceReference = trim($evidenceReference);
+        $notes = trim($notes);
+        $targetEnvironment = $targetEnvironment === null ? null : strtolower(trim($targetEnvironment));
+
+        if (!in_array($outcome, ['accepted', 'rejected', 'unresolved'], true)) {
+            throw new \InvalidArgumentException('نتيجة التسوية غير صحيحة.');
+        }
+        if (!in_array($evidenceType, ['zatca_portal', 'official_response', 'other'], true)) {
+            throw new \InvalidArgumentException('مصدر الدليل غير صحيح.');
+        }
+        if (strlen($evidenceReference) < 3 || strlen($evidenceReference) > 255) {
+            throw new \InvalidArgumentException('أدخل مرجع دليل واضحًا من 3 إلى 255 حرفًا.');
+        }
+        if (strlen($notes) < 10 || strlen($notes) > 3000) {
+            throw new \InvalidArgumentException('الملاحظات مطلوبة ويجب أن تكون بين 10 و3000 حرف.');
+        }
+        if ($outcome !== 'unresolved' && $evidenceType === 'other') {
+            throw new \InvalidArgumentException('قرار القبول أو الرفض يتطلب دليلًا من بوابة زاتكا أو استجابة رسمية.');
+        }
+
+        $actorId = (int) $actor->getAuthIdentifier();
+
+        return DB::transaction(function () use (
+            $submissionId, $outcome, $evidenceType, $evidenceReference, $notes,
+            $targetEnvironment, $actorId
+        ) {
+            $submission = ZatcaInvoiceSubmission::query()
+                ->whereKey($submissionId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$submission) {
+                throw new \RuntimeException('سجل إرسال زاتكا غير موجود.');
+            }
+
+            $isUnknownEnvironment = $submission->environment === ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN;
+            $isStaleProcessing = $submission->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
+                && (!$submission->last_attempt_at || $submission->last_attempt_at->lte(now()->subMinutes(30)));
+            $isAmbiguousFailure = $submission->status === ZatcaInvoiceSubmission::STATUS_FAILED
+                && $submission->hasAmbiguousOutcome();
+            $isEligible = ($isUnknownEnvironment && $submission->status !== ZatcaInvoiceSubmission::STATUS_RECONCILED)
+                || $submission->status === ZatcaInvoiceSubmission::STATUS_UNCERTAIN
+                || $isStaleProcessing
+                || $isAmbiguousFailure;
+
+            if (!$isEligible) {
+                throw new \RuntimeException('هذا السجل لا يحتاج إلى تسوية يدوية أو لم يعد مؤهلًا لها.');
+            }
+
+            $resolvedEnvironment = $submission->environment;
+            $targetSubmission = null;
+
+            if ($isUnknownEnvironment && $outcome !== 'unresolved') {
+                if (!in_array($targetEnvironment, ['test', 'production'], true)) {
+                    throw new \InvalidArgumentException('حدد بيئة الإرسال المؤكدة من الدليل: Test أو Production.');
+                }
+                $resolvedEnvironment = $targetEnvironment;
+                $targetSubmission = ZatcaInvoiceSubmission::query()
+                    ->where('invoice_id', $submission->invoice_id)
+                    ->where('environment', $targetEnvironment)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($targetSubmission
+                    && $outcome === 'rejected'
+                    && $targetSubmission->status === ZatcaInvoiceSubmission::STATUS_SENT) {
+                    throw new \RuntimeException('يوجد سجل مرسل بالفعل في البيئة المحددة؛ راجع التعارض قبل اعتماد الرفض.');
+                }
+
+                if ($targetSubmission
+                    && $targetSubmission->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
+                    && $targetSubmission->last_attempt_at
+                    && $targetSubmission->last_attempt_at->gt(now()->subMinutes(30))) {
+                    throw new \RuntimeException('هناك إرسال جارٍ في البيئة المحددة. انتظر نهايته قبل التسوية.');
+                }
+            } elseif (!$isUnknownEnvironment && $targetEnvironment !== null
+                && $targetEnvironment !== '' && $targetEnvironment !== $submission->environment) {
+                throw new \InvalidArgumentException('لا يمكن تغيير بيئة سجل معلوم أثناء التسوية.');
+            }
+
+            $capture = static function (ZatcaInvoiceSubmission $row): array {
+                return [
+                    'status' => $row->status,
+                    'environment' => $row->environment,
+                    'status_code' => $row->status_code,
+                    'response' => $row->response,
+                ];
+            };
+
+            $applyOutcome = static function (ZatcaInvoiceSubmission $row, string $decision, string $reviewNotes): void {
+                if ($decision === 'accepted') {
+                    $row->status = ZatcaInvoiceSubmission::STATUS_SENT;
+                    // A manual review is not an HTTP response. Preserve the old code/response in the audit event.
+                    $row->status_code = null;
+                    $row->response = null;
+                    $row->error = null;
+                } elseif ($decision === 'rejected') {
+                    $row->status = ZatcaInvoiceSubmission::STATUS_REJECTED;
+                    $row->status_code = null;
+                    $row->response = null;
+                    $row->error = 'تم توثيق رفض زاتكا يدويًا. راجع الدليل وسبب الرفض قبل إعادة الإرسال.';
+                } else {
+                    $row->status = ZatcaInvoiceSubmission::STATUS_UNCERTAIN;
+                    $row->error = 'لا تزال نتيجة زاتكا غير محسومة بعد المراجعة اليدوية: ' . $reviewNotes;
+                }
+                $row->save();
+            };
+
+            $createEvent = function (
+                ZatcaInvoiceSubmission $row,
+                array $before,
+                string $newStatus,
+                string $newEnvironment,
+                ?string $targetEnv
+            ) use ($outcome, $evidenceType, $evidenceReference, $notes, $actorId): ZatcaSubmissionReconciliation {
+                $event = new ZatcaSubmissionReconciliation();
+                $event->submission_id = $row->id;
+                $event->outcome = $outcome;
+                $event->previous_status = $before['status'];
+                $event->new_status = $newStatus;
+                $event->previous_environment = $before['environment'];
+                $event->new_environment = $newEnvironment;
+                $event->target_environment = $targetEnv;
+                $event->previous_status_code = $before['status_code'];
+                $event->previous_response = $before['response'];
+                $event->evidence_type = $evidenceType;
+                $event->evidence_reference = $evidenceReference;
+                $event->notes = $notes;
+                $event->reconciled_by = $actorId;
+                $event->reconciled_at = now();
+                $event->save();
+                return $event;
+            };
+
+            $submissionBefore = $capture($submission);
+
+            if ($outcome === 'unresolved') {
+                $applyOutcome($submission, 'unresolved', $notes);
+                $event = $createEvent(
+                    $submission,
+                    $submissionBefore,
+                    $submission->status,
+                    $submission->environment,
+                    $resolvedEnvironment === ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN ? null : $resolvedEnvironment
+                );
+
+                return [
+                    'status' => 'uncertain',
+                    'submission_id' => $submission->id,
+                    'audit_event_id' => $event->id,
+                    'message' => 'تم توثيق المراجعة، لكن النتيجة لا تزال غير محسومة. ما زالت إعادة الإرسال محظورة.',
+                ];
+            }
+
+            if ($isUnknownEnvironment && $targetSubmission) {
+                $targetBefore = $capture($targetSubmission);
+
+                if (!($outcome === 'accepted' && $targetSubmission->status === ZatcaInvoiceSubmission::STATUS_SENT)) {
+                    $applyOutcome($targetSubmission, $outcome, $notes);
+                }
+
+                // Retain the legacy unknown row as an audited archive, but do not let it block
+                // the now-identified environment forever. It remains visible in the audit history.
+                $submission->status = ZatcaInvoiceSubmission::STATUS_RECONCILED;
+                $submission->error = 'تمت تسوية سجل البيئة غير المعروفة بدليل موثق إلى البيئة ' . $targetEnvironment . '.';
+                $submission->save();
+
+                $legacyEvent = $createEvent(
+                    $submission,
+                    $submissionBefore,
+                    $submission->status,
+                    $submission->environment,
+                    $targetEnvironment
+                );
+                $targetEvent = $createEvent(
+                    $targetSubmission,
+                    $targetBefore,
+                    $targetSubmission->status,
+                    $targetSubmission->environment,
+                    $targetEnvironment
+                );
+
+                return [
+                    'status' => $targetSubmission->status,
+                    'submission_id' => $targetSubmission->id,
+                    'audit_event_id' => $targetEvent->id,
+                    'archived_legacy_event_id' => $legacyEvent->id,
+                    'message' => 'تم حفظ دليل التسوية في السجل الحالي وسجل البيئة القديمة.',
+                ];
+            }
+
+            if ($isUnknownEnvironment) {
+                $submission->environment = $resolvedEnvironment;
+            }
+            $applyOutcome($submission, $outcome, $notes);
+            $event = $createEvent(
+                $submission,
+                $submissionBefore,
+                $submission->status,
+                $submission->environment,
+                $resolvedEnvironment
+            );
+
+            return [
+                'status' => $submission->status,
+                'submission_id' => $submission->id,
+                'audit_event_id' => $event->id,
+                'message' => $outcome === 'accepted'
+                    ? 'تم توثيق القبول. لن تتكرر عملية الإرسال لهذه البيئة.'
+                    : 'تم توثيق الرفض. يمكن بدء محاولة جديدة بعد معالجة سبب الرفض.',
+            ];
         });
     }
 

@@ -10,6 +10,7 @@ use App\Services\ZatcaService;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Livewire\WithPagination;
 
 class ZatcaSubmissionsPage extends Page
@@ -27,6 +28,13 @@ class ZatcaSubmissionsPage extends Page
     public string $statusFilter = 'all';
     public string $search = '';
     public ?int $confirmingInvoiceId = null;
+
+    public ?int $reconcilingSubmissionId = null;
+    public string $reconciliationOutcome = 'unresolved';
+    public string $reconciliationEvidenceType = 'zatca_portal';
+    public string $reconciliationEvidenceReference = '';
+    public string $reconciliationNotes = '';
+    public string $reconciliationTargetEnvironment = 'test';
 
     public static function canAccess(): bool
     {
@@ -49,7 +57,7 @@ class ZatcaSubmissionsPage extends Page
 
     public function updatedStatusFilter(): void
     {
-        if (!in_array($this->statusFilter, ['all', 'not_sent', 'sent', 'failed', 'processing', 'pending', 'uncertain'], true)) {
+        if (!in_array($this->statusFilter, ['all', 'not_sent', 'sent', 'failed', 'rejected', 'processing', 'pending', 'uncertain'], true)) {
             $this->statusFilter = 'all';
         }
 
@@ -84,8 +92,20 @@ class ZatcaSubmissionsPage extends Page
             })
             ->leftJoin('zatca_invoice_submissions as zatca_legacy_unknown', function ($join) {
                 $join->on('zatca_legacy_unknown.invoice_id', '=', 'invoices.id')
-                    ->where('zatca_legacy_unknown.environment', '=', 'unknown');
+                    ->where('zatca_legacy_unknown.environment', '=', 'unknown')
+                    ->where('zatca_legacy_unknown.status', '!=', ZatcaInvoiceSubmission::STATUS_RECONCILED);
             })
+            ->leftJoinSub(
+                DB::table('zatca_submission_reconciliations')
+                    ->select('submission_id', DB::raw('MAX(id) as latest_id'))
+                    ->groupBy('submission_id'),
+                'zatca_latest_reconciliation_key',
+                function ($join) {
+                    $join->on('zatca_latest_reconciliation_key.submission_id', '=', 'zatca_current.id');
+                }
+            )
+            ->leftJoin('zatca_submission_reconciliations as zatca_latest_reconciliation', 'zatca_latest_reconciliation.id', '=', 'zatca_latest_reconciliation_key.latest_id')
+            ->leftJoin('users as zatca_reconciler', 'zatca_reconciler.id', '=', 'zatca_latest_reconciliation.reconciled_by')
             ->select([
                 'invoices.*',
                 'zatca_current.id as zatca_page_submission_id',
@@ -100,6 +120,12 @@ class ZatcaSubmissionsPage extends Page
                 'zatca_current.sending_mode as zatca_page_sending_mode',
                 'zatca_legacy_unknown.id as zatca_page_legacy_unknown_id',
                 'zatca_legacy_unknown.error as zatca_page_legacy_unknown_error',
+                'zatca_latest_reconciliation.outcome as zatca_page_reconciliation_outcome',
+                'zatca_latest_reconciliation.evidence_type as zatca_page_reconciliation_evidence_type',
+                'zatca_latest_reconciliation.evidence_reference as zatca_page_reconciliation_evidence_reference',
+                'zatca_latest_reconciliation.notes as zatca_page_reconciliation_notes',
+                'zatca_latest_reconciliation.reconciled_at as zatca_page_reconciled_at',
+                'zatca_reconciler.name as zatca_page_reconciled_by_name',
             ]);
 
         if (trim($this->search) !== '') {
@@ -126,7 +152,7 @@ class ZatcaSubmissionsPage extends Page
                             });
                     });
             });
-        } elseif (in_array($this->statusFilter, ['sent', 'failed', 'processing', 'pending'], true)) {
+        } elseif (in_array($this->statusFilter, ['sent', 'failed', 'rejected', 'processing', 'pending'], true)) {
             $query->where('zatca_current.status', $this->statusFilter);
         }
 
@@ -162,7 +188,8 @@ class ZatcaSubmissionsPage extends Page
             })
             ->leftJoin('zatca_invoice_submissions as zatca_uncertain_legacy', function ($join) {
                 $join->on('zatca_uncertain_legacy.invoice_id', '=', 'invoices.id')
-                    ->where('zatca_uncertain_legacy.environment', '=', 'unknown');
+                    ->where('zatca_uncertain_legacy.environment', '=', 'unknown')
+                    ->where('zatca_uncertain_legacy.status', '!=', ZatcaInvoiceSubmission::STATUS_RECONCILED);
             })
             ->where(function (Builder $inner) {
                 $inner->where('zatca_uncertain_current.status', ZatcaInvoiceSubmission::STATUS_UNCERTAIN)
@@ -211,6 +238,7 @@ class ZatcaSubmissionsPage extends Page
         $legacyUnknownExists = ZatcaInvoiceSubmission::query()
             ->where('invoice_id', $invoiceId)
             ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+            ->where('status', '!=', ZatcaInvoiceSubmission::STATUS_RECONCILED)
             ->exists();
 
         if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_SENT) {
@@ -283,6 +311,152 @@ class ZatcaSubmissionsPage extends Page
             ->body($message)
             ->warning()
             ->send();
+    }
+
+    private function canManageManualReconciliation(): bool
+    {
+        return auth()->user()?->hasAnyRole(['super_admin', 'admin']) ?? false;
+    }
+
+    public function requestManualReconciliation(int $submissionId): void
+    {
+        if (!$this->canManageManualReconciliation()) {
+            Notification::make()->title('ليس لديك صلاحية توثيق تسوية زاتكا')->danger()->send();
+            return;
+        }
+
+        $submission = ZatcaInvoiceSubmission::query()->find($submissionId);
+        if (!$submission || !$this->eligibleInvoicesQuery()->where('invoices.id', $submission->invoice_id)->exists()) {
+            Notification::make()->title('سجل زاتكا غير متاح للمراجعة')->warning()->send();
+            return;
+        }
+
+        $unknownEnvironment = $submission->environment === ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN;
+        $staleProcessing = $submission->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
+            && (!$submission->last_attempt_at || $submission->last_attempt_at->lte(now()->subMinutes(30)));
+        $ambiguousFailed = $submission->status === ZatcaInvoiceSubmission::STATUS_FAILED
+            && $submission->hasAmbiguousOutcome();
+        if (!$unknownEnvironment
+            && $submission->status !== ZatcaInvoiceSubmission::STATUS_UNCERTAIN
+            && !$staleProcessing
+            && !$ambiguousFailed) {
+            Notification::make()->title('السجل لا يحتاج إلى تسوية يدوية')->warning()->send();
+            return;
+        }
+
+        $this->reconcilingSubmissionId = (int) $submission->id;
+        $this->reconciliationOutcome = 'unresolved';
+        $this->reconciliationEvidenceType = 'zatca_portal';
+        $this->reconciliationEvidenceReference = '';
+        $this->reconciliationNotes = '';
+        $this->reconciliationTargetEnvironment = in_array($submission->environment, ['test', 'production'], true)
+            ? $submission->environment
+            : ($this->environment === 'production' ? 'production' : 'test');
+        $this->resetValidation();
+    }
+
+    public function getReconcilingSubmissionProperty(): ?ZatcaInvoiceSubmission
+    {
+        if (!$this->reconcilingSubmissionId || !$this->canManageManualReconciliation()) {
+            return null;
+        }
+
+        $submission = ZatcaInvoiceSubmission::query()
+            ->with('reconciliations.reconciledBy')
+            ->find($this->reconcilingSubmissionId);
+
+        if (!$submission || !$this->eligibleInvoicesQuery()->where('invoices.id', $submission->invoice_id)->exists()) {
+            return null;
+        }
+
+        return $submission;
+    }
+
+    public function getReconciliationHistoryProperty()
+    {
+        $submission = $this->reconcilingSubmission;
+        if (!$submission) {
+            return collect();
+        }
+
+        return $submission->reconciliations()
+            ->with('reconciledBy')
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    public function cancelManualReconciliation(): void
+    {
+        $this->reconcilingSubmissionId = null;
+        $this->resetValidation();
+    }
+
+    public function saveManualReconciliation(): void
+    {
+        if (!$this->canManageManualReconciliation()) {
+            Notification::make()->title('ليس لديك صلاحية توثيق تسوية زاتكا')->danger()->send();
+            return;
+        }
+
+        $submission = $this->reconcilingSubmission;
+        if (!$submission) {
+            Notification::make()->title('سجل زاتكا غير متاح للمراجعة')->danger()->send();
+            $this->reconcilingSubmissionId = null;
+            return;
+        }
+
+        $rules = [
+            'reconciliationOutcome' => 'required|in:accepted,rejected,unresolved',
+            'reconciliationEvidenceType' => 'required|in:zatca_portal,official_response,other',
+            'reconciliationEvidenceReference' => 'required|string|min:3|max:255',
+            'reconciliationNotes' => 'required|string|min:10|max:3000',
+        ];
+        if ($submission->environment === ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN
+            && $this->reconciliationOutcome !== 'unresolved') {
+            $rules['reconciliationTargetEnvironment'] = 'required|in:test,production';
+        }
+        $this->validate($rules);
+
+        if ($this->reconciliationOutcome !== 'unresolved' && $this->reconciliationEvidenceType === 'other') {
+            $this->addError('reconciliationEvidenceType', 'قرار القبول أو الرفض يتطلب دليلًا رسميًا من بوابة زاتكا أو استجابة رسمية.');
+            return;
+        }
+
+        try {
+            $result = app(ZatcaService::class)->recordManualReconciliation(
+                (int) $submission->id,
+                $this->reconciliationOutcome,
+                $this->reconciliationEvidenceType,
+                $this->reconciliationEvidenceReference,
+                $this->reconciliationNotes,
+                $submission->environment === ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN
+                    ? $this->reconciliationTargetEnvironment
+                    : $submission->environment
+            );
+
+            $status = $result['status'] ?? 'uncertain';
+            $title = match ($status) {
+                ZatcaInvoiceSubmission::STATUS_SENT => 'تم توثيق قبول الفاتورة',
+                ZatcaInvoiceSubmission::STATUS_REJECTED => 'تم توثيق رفض الفاتورة',
+                ZatcaInvoiceSubmission::STATUS_RECONCILED => 'تمت أرشفة سجل البيئة القديمة',
+                default => 'تم حفظ المراجعة — النتيجة غير محسومة',
+            };
+
+            $this->reconcilingSubmissionId = null;
+            $this->resetValidation();
+            Notification::make()
+                ->title($title)
+                ->body($result['message'] ?? 'تم حفظ حدث التسوية في سجل التدقيق.')
+                ->success()
+                ->send();
+        } catch (\Throwable $e) {
+            report($e);
+            Notification::make()
+                ->title('تعذر حفظ تسوية زاتكا')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
     }
 
     public function cancelSendConfirmation(): void
