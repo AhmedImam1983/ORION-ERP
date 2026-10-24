@@ -112,6 +112,15 @@ class InvoiceResource extends Resource
                         return;
                     }
 
+                    if (!empty($result['needs_reconciliation'])) {
+                        Notification::make()
+                            ->title('نتيجة إرسال زاتكا غير محسومة — لا تعاود الإرسال')
+                            ->body(($result['error'] ?? 'راجع سجل الإرسال قبل أي محاولة جديدة') . ' — البيئة: ' . $environmentLabel)
+                            ->warning()
+                            ->send();
+                        return;
+                    }
+
                     if (!empty($result['success'])) {
                         Notification::make()
                             ->title('تم قبول إرسال الفاتورة من زاتكا')

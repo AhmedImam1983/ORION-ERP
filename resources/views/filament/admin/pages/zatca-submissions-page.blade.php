@@ -14,7 +14,7 @@
         .dark .zsp-alert{border-color:#075985;background:rgba(3,105,161,.14);color:#bae6fd}
         .zsp-alert.is-warning{border-color:#fcd34d;background:#fffbeb;color:#92400e}
         .dark .zsp-alert.is-warning{border-color:#92400e;background:rgba(217,119,6,.12);color:#fde68a}
-        .zsp-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+        .zsp-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
         .zsp-stat{position:relative;min-width:0;overflow:hidden;background:var(--zsp-bg);border:1px solid var(--zsp-border);border-radius:14px;padding:15px 16px}
         .zsp-stat:before{content:"";position:absolute;inset:0 0 auto;height:3px;background:#64748b}
         .zsp-stat.is-purple:before{background:#8b5cf6}.zsp-stat.is-green:before{background:#10b981}.zsp-stat.is-red:before{background:#f43f5e}.zsp-stat.is-amber:before{background:#f59e0b}
@@ -35,6 +35,7 @@
         .zsp-badge.is-sent{background:#d1fae5;color:#065f46}.dark .zsp-badge.is-sent{background:rgba(16,185,129,.16);color:#6ee7b7}
         .zsp-badge.is-failed{background:#ffe4e6;color:#9f1239}.dark .zsp-badge.is-failed{background:rgba(244,63,94,.16);color:#fda4af}
         .zsp-badge.is-processing{background:#fef3c7;color:#92400e}.dark .zsp-badge.is-processing{background:rgba(245,158,11,.16);color:#fcd34d}
+        .zsp-badge.is-uncertain{background:#ffedd5;color:#9a3412}.dark .zsp-badge.is-uncertain{background:rgba(234,88,12,.16);color:#fdba74}
         .zsp-badge.is-neutral{background:#e2e8f0;color:#334155}.dark .zsp-badge.is-neutral{background:#26364d;color:#cbd5e1}
         .zsp-action{display:inline-flex;align-items:center;justify-content:center;min-height:34px;border:1px solid transparent;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:900;white-space:nowrap;cursor:pointer;transition:opacity .15s,transform .15s}
         .zsp-action:hover:not(:disabled){transform:translateY(-1px)}.zsp-action:disabled{cursor:not-allowed;opacity:.65}
@@ -92,6 +93,7 @@
             <div class="zsp-stat is-green"><div class="zsp-stat-label">مرسلة بنجاح في هذه البيئة</div><div class="zsp-stat-value">{{ number_format($stats['sent']) }}</div></div>
             <div class="zsp-stat is-red"><div class="zsp-stat-label">محاولات فاشلة</div><div class="zsp-stat-value">{{ number_format($stats['failed']) }}</div></div>
             <div class="zsp-stat is-amber"><div class="zsp-stat-label">قيد الإرسال</div><div class="zsp-stat-value">{{ number_format($stats['processing']) }}</div></div>
+            <div class="zsp-stat is-amber"><div class="zsp-stat-label">نتيجة غير محسومة — مراجعة مطلوبة</div><div class="zsp-stat-value">{{ number_format($stats['uncertain']) }}</div></div>
             <div class="zsp-stat"><div class="zsp-stat-label">لم تُرسل بنجاح بعد</div><div class="zsp-stat-value">{{ number_format($stats['not_sent']) }}</div></div>
         </div>
 
@@ -110,6 +112,7 @@
                         <option value="failed">فشلت</option>
                         <option value="processing">قيد الإرسال</option>
                         <option value="pending">معلقة</option>
+                        <option value="uncertain">نتيجة غير محسومة</option>
                     </select>
                 </label>
             </div>
@@ -121,7 +124,8 @@
                     </tr></thead>
                     <tbody>
                         @forelse ($this->invoices as $invoice)
-                            @php($submissionStatus = $invoice->zatca_page_status)
+                            @php($hasLegacyUnknown = !empty($invoice->zatca_page_legacy_unknown_id) && $invoice->zatca_page_status !== 'sent')
+                            @php($submissionStatus = $hasLegacyUnknown ? 'uncertain' : $invoice->zatca_page_status)
                             <tr>
                                 <td class="zsp-nowrap">
                                     <a href="{{ $this->getInvoiceViewUrl($invoice->id) }}" class="zsp-invoice-link">{{ $invoice->invoice_number }}</a>
@@ -134,6 +138,17 @@
                                     @if ($submissionStatus === 'sent')
                                         <span class="zsp-badge is-sent">مرسلة بنجاح</span>
                                         <div class="zsp-small zsp-muted">HTTP {{ $invoice->zatca_page_status_code ?? '—' }}</div>
+                                    @elseif ($submissionStatus === 'uncertain')
+                                        <span class="zsp-badge is-uncertain">نتيجة غير محسومة</span>
+                                        <div class="zsp-small">لا تعاود الإرسال قبل مراجعة السجل.</div>
+                                        @if ($hasLegacyUnknown)
+                                            <div class="zsp-small zsp-cell-error">بيئة الإرسال القديمة غير معروفة.</div>
+                                            @if ($invoice->zatca_page_legacy_unknown_error)
+                                                <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">تفاصيل السجل القديم</summary><p>{{ $invoice->zatca_page_legacy_unknown_error }}</p></details>
+                                            @endif
+                                        @elseif ($invoice->zatca_page_error)
+                                            <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">تفاصيل المحاولة</summary><p>{{ $invoice->zatca_page_error }}</p></details>
+                                        @endif
                                     @elseif ($submissionStatus === 'failed')
                                         <span class="zsp-badge is-failed">فشلت</span>
                                         @if ($invoice->zatca_page_error)
@@ -163,8 +178,14 @@
                                 <td class="zsp-nowrap">
                                     @if ($submissionStatus === 'sent')
                                         <button type="button" disabled class="zsp-action is-done">تم الإرسال</button>
-                                    @elseif ($submissionStatus === 'processing' && $invoice->zatca_page_last_attempt_at && \Illuminate\Support\Carbon::parse($invoice->zatca_page_last_attempt_at)->gt(now()->subMinutes(30)))
-                                        <button type="button" disabled class="zsp-action is-wait">قيد التنفيذ</button>
+                                    @elseif ($submissionStatus === 'uncertain')
+                                        <button type="button" disabled class="zsp-action is-wait">تحتاج مراجعة — ممنوع الإرسال</button>
+                                    @elseif ($submissionStatus === 'processing')
+                                        @if ($invoice->zatca_page_last_attempt_at && \Illuminate\Support\Carbon::parse($invoice->zatca_page_last_attempt_at)->gt(now()->subMinutes(30)))
+                                            <button type="button" disabled class="zsp-action is-wait">قيد التنفيذ</button>
+                                        @else
+                                            <button type="button" wire:click="inspectSubmissionState({{ $invoice->id }})" wire:loading.attr="disabled" class="zsp-action is-wait">فحص المحاولة القديمة</button>
+                                        @endif
                                     @else
                                         <button type="button" wire:click="requestSendConfirmation({{ $invoice->id }})" wire:loading.attr="disabled" wire:target="requestSendConfirmation({{ $invoice->id }})" class="zsp-action {{ $environment === 'production' ? 'is-production' : 'is-primary' }}">
                                             {{ $submissionStatus === 'failed' ? 'إعادة المحاولة' : 'إرسال الآن' }}

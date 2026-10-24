@@ -19,6 +19,8 @@ class ZatcaService
         $sendingModeName = null;
         $rootPath = null;
         $step = 'init';
+        $responseText = null;
+        $invoiceSubmissionAttempted = false;
 
         try {
             $environment = strtolower(trim($environment));
@@ -97,17 +99,51 @@ class ZatcaService
                     return ['state' => 'sent', 'submission' => $current];
                 }
 
-                if (
-                    $current
-                    && $current->status === ZatcaInvoiceSubmission::STATUS_PROCESSING
-                    && $current->last_attempt_at
-                    && $current->last_attempt_at->gt(now()->subMinutes(30))
-                ) {
-                    return ['state' => 'processing', 'submission' => $current];
+                // Legacy rows with an unknown environment must not be silently
+                // treated as unsent in either Test or Production.
+                $legacyUnknown = ZatcaInvoiceSubmission::query()
+                    ->where('invoice_id', $invoice->getKey())
+                    ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($legacyUnknown) {
+                    return [
+                        'state' => 'uncertain',
+                        'submission' => $legacyUnknown,
+                        'legacy_unknown' => true,
+                    ];
                 }
 
-                // A processing record older than 30 minutes is treated as stale,
-                // so a crashed request cannot permanently block future retries.
+                if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_UNCERTAIN) {
+                    return ['state' => 'uncertain', 'submission' => $current];
+                }
+
+                // Failed records from the previous implementation may hide a timeout
+                // after the remote request. Convert those records instead of retrying.
+                if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_FAILED
+                    && $current->hasAmbiguousOutcome()) {
+                    $current->status = ZatcaInvoiceSubmission::STATUS_UNCERTAIN;
+                    $current->error = 'نتيجة المحاولة السابقة غير محسومة؛ تم منع إعادة الإرسال التلقائي. '
+                        . (string) ($current->error ?? 'لا يوجد رد موثوق محفوظ من زاتكا.');
+                    $current->save();
+
+                    return ['state' => 'uncertain', 'submission' => $current];
+                }
+
+                if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_PROCESSING) {
+                    if ($current->last_attempt_at
+                        && $current->last_attempt_at->gt(now()->subMinutes(30))) {
+                        return ['state' => 'processing', 'submission' => $current];
+                    }
+
+                    // A stale processing row is not proof the remote request failed.
+                    $current->status = ZatcaInvoiceSubmission::STATUS_UNCERTAIN;
+                    $current->error = 'انتهت مهلة انتظار المحاولة السابقة دون نتيجة مؤكدة؛ لا تعاود الإرسال تلقائيًا.';
+                    $current->save();
+
+                    return ['state' => 'uncertain', 'submission' => $current];
+                }
                 $current ??= new ZatcaInvoiceSubmission();
                 $current->invoice_id = $invoice->getKey();
                 $current->environment = $environment;
@@ -137,6 +173,34 @@ class ZatcaService
                     'sending_mode' => $sendingModeName,
                     'error' => 'تم إرسال الفاتورة بالفعل إلى هذه البيئة. لن نكرر الإرسال تلقائيًا.',
                     'raw_response' => $claim['submission']->response,
+                ];
+            }
+
+            if ($claim['state'] === 'uncertain') {
+                $legacyUnknown = !empty($claim['legacy_unknown']);
+                $uncertainSubmission = $claim['submission'] ?? null;
+                $uncertainMessage = $legacyUnknown
+                    ? 'يوجد سجل زاتكا قديم لا يحدد بيئة الإرسال. تمت حماية الفاتورة من إعادة الإرسال حتى تتم مراجعة السجل يدويًا.'
+                    : 'نتيجة محاولة زاتكا السابقة غير محسومة. لا تعاود الإرسال حتى تتم مراجعة الحالة والرد المحفوظ.';
+
+                if ($uncertainSubmission && !empty($uncertainSubmission->error)) {
+                    $uncertainMessage .= ' التفاصيل المحفوظة: ' . $uncertainSubmission->error;
+                }
+
+                return [
+                    'success' => false,
+                    'already_sent' => false,
+                    'in_progress' => false,
+                    'uncertain' => true,
+                    'needs_reconciliation' => true,
+                    'status' => 'uncertain',
+                    'status_code' => $uncertainSubmission?->status_code,
+                    'uuid' => $uncertainSubmission?->uuid,
+                    'invoice_hash' => $uncertainSubmission?->invoice_hash,
+                    'environment' => $environment,
+                    'sending_mode' => $sendingModeName,
+                    'error' => $uncertainMessage,
+                    'raw_response' => null,
                 ];
             }
 
@@ -415,6 +479,8 @@ class ZatcaService
 
                 $step = '9b-compliance-invoice-api';
                 Log::info("ZATCA STEP: {$step}");
+                // From this point, the invoice request may have reached ZATCA.
+                $invoiceSubmissionAttempted = true;
                 $reportingModel = $apiReqLogic->CallComplianceInvoiceAPI(
                     $tokenResponse->BinarySecurityToken,
                     $tokenResponse->Secret,
@@ -429,6 +495,8 @@ class ZatcaService
 
                 $step = '9d-call-reporting-api';
                 Log::info("ZATCA STEP: {$step}");
+                // From this point, the invoice request may have reached ZATCA.
+                $invoiceSubmissionAttempted = true;
                 $reportingModel = $apiReqLogic->CallReportingAPI(
                     $certBase64,
                     $secretKey,
@@ -443,7 +511,13 @@ class ZatcaService
 
             $step = '10-read-response';
             Log::info("ZATCA STEP: {$step}");
-            $isSuccess  = (bool) $reportingModel->IsSuccess;
+            $isSuccess = ZatcaInvoiceSubmission::normalizeApiSuccessFlag(
+                $reportingModel->IsSuccess ?? null
+            );
+            if ($isSuccess === null) {
+                throw new \RuntimeException('تعذر تفسير حقل IsSuccess في استجابة زاتكا؛ نتيجة الإرسال غير محسومة.');
+            }
+
             $statusCode = (int) ($reportingModel->StatusCode ?? 0);
             $errorMsg   = $isSuccess ? null : ($reportingModel->ErrorMessage ?? 'خطأ غير معروف');
             Log::info("ZATCA STEP OK: {$step}");
@@ -459,6 +533,13 @@ class ZatcaService
             ]);
 
             $success = $isSuccess && $statusCode === 202;
+            $uncertainResponse = !$success
+                && ZatcaInvoiceSubmission::isAmbiguousApiResponse($statusCode, $isSuccess);
+
+            if ($uncertainResponse) {
+                $errorMsg = 'لم يتمكن النظام من تأكيد قبول الفاتورة أو رفضها بصورة قاطعة. لا تعاود الإرسال تلقائيًا.'
+                    . ($errorMsg ? ' رد زاتكا: ' . $errorMsg : ' كود الاستجابة: ' . $statusCode);
+            }
 
             $responseText = json_encode([
                 'status_code' => $statusCode,
@@ -466,10 +547,14 @@ class ZatcaService
                 'error' => $errorMsg,
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
+            $submissionStatus = $success
+                ? ZatcaInvoiceSubmission::STATUS_SENT
+                : ($uncertainResponse
+                    ? ZatcaInvoiceSubmission::STATUS_UNCERTAIN
+                    : ZatcaInvoiceSubmission::STATUS_FAILED);
+
             $submission->update([
-                'status' => $success
-                    ? ZatcaInvoiceSubmission::STATUS_SENT
-                    : ZatcaInvoiceSubmission::STATUS_FAILED,
+                'status' => $submissionStatus,
                 'status_code' => $statusCode,
                 'uuid' => $uuid,
                 'invoice_hash' => $invoiceHash,
@@ -483,7 +568,9 @@ class ZatcaService
                 'success'      => $success,
                 'already_sent' => false,
                 'in_progress'  => false,
-                'status'       => $success ? 'sent' : 'failed',
+                'uncertain'    => $uncertainResponse,
+                'needs_reconciliation' => $uncertainResponse,
+                'status'       => $success ? 'sent' : ($uncertainResponse ? 'uncertain' : 'failed'),
                 'status_code'  => $statusCode,
                 'uuid'         => $uuid,
                 'invoice_hash' => $invoiceHash,
@@ -502,15 +589,22 @@ class ZatcaService
                 'error' => $e->getMessage(),
             ]);
 
+            $uncertainFailure = $invoiceSubmissionAttempted;
+            if ($uncertainFailure) {
+                $errorMsg = 'اتصال الإرسال إلى زاتكا بدأ لكن النتيجة النهائية غير مؤكدة. لا تعاود الإرسال تلقائيًا. ' . $errorMsg;
+            }
+
             if ($submission instanceof ZatcaInvoiceSubmission) {
                 try {
                     $submission->update([
-                        'status' => ZatcaInvoiceSubmission::STATUS_FAILED,
+                        'status' => $uncertainFailure
+                            ? ZatcaInvoiceSubmission::STATUS_UNCERTAIN
+                            : ZatcaInvoiceSubmission::STATUS_FAILED,
                         'status_code' => $statusCode,
                         'uuid' => $uuid,
                         'invoice_hash' => $invoiceHash,
                         'error' => $errorMsg,
-                        'response' => null,
+                        'response' => $responseText,
                         'sent_at' => null,
                         'sending_mode' => $sendingModeName,
                     ]);
@@ -527,16 +621,103 @@ class ZatcaService
                 'success'      => false,
                 'already_sent' => false,
                 'in_progress'  => false,
-                'status'       => 'failed',
+                'uncertain'    => $uncertainFailure,
+                'needs_reconciliation' => $uncertainFailure,
+                'status'       => $uncertainFailure ? 'uncertain' : 'failed',
                 'status_code'  => $statusCode,
                 'uuid'         => $uuid,
                 'invoice_hash' => $invoiceHash,
                 'environment'  => $environment,
                 'sending_mode' => $sendingModeName,
                 'error'        => $errorMsg,
-                'raw_response' => null,
+                'raw_response' => $responseText,
             ];
         }
+    }
+
+    /**
+     * Inspect a risky/stale previous attempt without issuing any remote request.
+     * This method is intentionally side-effect-free outside local state repair.
+     */
+    public function protectStaleSubmission(int $invoiceId, string $environment): array
+    {
+        $environment = strtolower(trim($environment));
+        if (!in_array($environment, ['test', 'production'], true)) {
+            return ['status' => 'failed', 'error' => 'بيئة زاتكا غير صحيحة.'];
+        }
+
+        return DB::transaction(function () use ($invoiceId, $environment) {
+            $lockedInvoice = DB::table('invoices')
+                ->where('id', $invoiceId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedInvoice) {
+                return ['status' => 'not_found', 'error' => 'الفاتورة غير موجودة.'];
+            }
+
+            if ($lockedInvoice->type !== 'sale'
+                || !in_array($lockedInvoice->status, ['confirmed', 'partial', 'paid'], true)) {
+                return ['status' => 'not_eligible', 'error' => 'الفاتورة لم تعد مؤهلة للإرسال إلى زاتكا.'];
+            }
+
+            $current = ZatcaInvoiceSubmission::query()
+                ->where('invoice_id', $invoiceId)
+                ->where('environment', $environment)
+                ->lockForUpdate()
+                ->first();
+
+            if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_SENT) {
+                return ['status' => 'sent', 'error' => 'الفاتورة مرسلة بالفعل إلى هذه البيئة.'];
+            }
+
+            $legacyUnknown = ZatcaInvoiceSubmission::query()
+                ->where('invoice_id', $invoiceId)
+                ->where('environment', ZatcaInvoiceSubmission::ENVIRONMENT_UNKNOWN)
+                ->lockForUpdate()
+                ->first();
+
+            if ($legacyUnknown) {
+                return [
+                    'status' => 'uncertain',
+                    'error' => 'يوجد سجل زاتكا قديم لا يحدد بيئة الإرسال. راجع السجل يدويًا قبل الإرسال.',
+                ];
+            }
+
+            if (!$current) {
+                return ['status' => 'ready', 'error' => 'لا يوجد سجل إرسال قديم يحتاج إلى حماية.'];
+            }
+
+            if ($current->status === ZatcaInvoiceSubmission::STATUS_UNCERTAIN) {
+                return [
+                    'status' => 'uncertain',
+                    'error' => $current->error ?: 'نتيجة محاولة زاتكا السابقة غير محسومة. لا تعاود الإرسال تلقائيًا.',
+                ];
+            }
+
+            if ($current->status === ZatcaInvoiceSubmission::STATUS_FAILED && $current->hasAmbiguousOutcome()) {
+                $current->status = ZatcaInvoiceSubmission::STATUS_UNCERTAIN;
+                $current->error = 'نتيجة المحاولة السابقة غير محسومة؛ تم منع إعادة الإرسال التلقائي. '
+                    . (string) ($current->error ?? 'لا يوجد رد موثوق محفوظ من زاتكا.');
+                $current->save();
+
+                return ['status' => 'uncertain', 'error' => $current->error];
+            }
+
+            if ($current->status !== ZatcaInvoiceSubmission::STATUS_PROCESSING) {
+                return ['status' => 'ready', 'error' => 'تغيّرت حالة السجل. راجع الحالة الحالية قبل أي إرسال جديد.'];
+            }
+
+            if ($current->last_attempt_at && $current->last_attempt_at->gt(now()->subMinutes(30))) {
+                return ['status' => 'processing', 'error' => 'المحاولة ما زالت ضمن مهلة الانتظار الحالية.'];
+            }
+
+            $current->status = ZatcaInvoiceSubmission::STATUS_UNCERTAIN;
+            $current->error = 'انتهت مهلة انتظار المحاولة السابقة دون نتيجة مؤكدة؛ لا تعاود الإرسال تلقائيًا.';
+            $current->save();
+
+            return ['status' => 'uncertain', 'error' => $current->error];
+        });
     }
 
     private function assertEligibleInvoiceState(string $type, string $status): void
