@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ZatcaInvoiceSubmission extends Model
 {
@@ -20,6 +21,8 @@ class ZatcaInvoiceSubmission extends Model
     public const STATUS_SENT = 'sent';
     public const STATUS_FAILED = 'failed';
     public const STATUS_UNCERTAIN = 'uncertain';
+    public const STATUS_REJECTED = 'rejected';
+    public const STATUS_RECONCILED = 'reconciled';
 
     protected $fillable = [
         'invoice_id',
@@ -195,6 +198,11 @@ class ZatcaInvoiceSubmission extends Model
         }
 
         return self::isAcceptedApiStatus($responseStatusCode);
+    }
+
+    public function reconciliations(): HasMany
+    {
+        return $this->hasMany(ZatcaSubmissionReconciliation::class, 'submission_id');
     }
 
     public function invoice(): BelongsTo

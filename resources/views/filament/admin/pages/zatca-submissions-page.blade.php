@@ -37,6 +37,7 @@
         .zsp-badge.is-failed{background:#ffe4e6;color:#9f1239}.dark .zsp-badge.is-failed{background:rgba(244,63,94,.16);color:#fda4af}
         .zsp-badge.is-processing{background:#fef3c7;color:#92400e}.dark .zsp-badge.is-processing{background:rgba(245,158,11,.16);color:#fcd34d}
         .zsp-badge.is-uncertain{background:#ffedd5;color:#9a3412}.dark .zsp-badge.is-uncertain{background:rgba(234,88,12,.16);color:#fdba74}
+        .zsp-badge.is-rejected{background:#dbeafe;color:#1d4ed8}.dark .zsp-badge.is-rejected{background:rgba(37,99,235,.16);color:#93c5fd}
         .zsp-badge.is-neutral{background:#e2e8f0;color:#334155}.dark .zsp-badge.is-neutral{background:#26364d;color:#cbd5e1}
         .zsp-action{display:inline-flex;align-items:center;justify-content:center;min-height:34px;border:1px solid transparent;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:900;white-space:nowrap;cursor:pointer;transition:opacity .15s,transform .15s}
         .zsp-action:hover:not(:disabled){transform:translateY(-1px)}.zsp-action:disabled{cursor:not-allowed;opacity:.65}
@@ -111,6 +112,7 @@
                         <option value="not_sent">لم تُرسل بنجاح</option>
                         <option value="sent">مرسلة بنجاح</option>
                         <option value="failed">فشلت</option>
+                        <option value="rejected">رفض موثّق</option>
                         <option value="processing">قيد الإرسال</option>
                         <option value="pending">معلقة</option>
                         <option value="uncertain">نتيجة غير محسومة</option>
@@ -136,7 +138,15 @@
                                 <td>{{ $invoice->customer?->name ?? 'عميل نقدي' }}</td>
                                 <td class="zsp-nowrap">{{ number_format((float) $invoice->total, 2) }} {{ $this->currencySymbol }}</td>
                                 <td>
-                                    @if ($submissionStatus === 'sent')
+                                    @if ($submissionStatus === 'sent' && ($invoice->zatca_page_reconciliation_outcome ?? null) === 'accepted' && $invoice->zatca_page_status_code === null)
+                                        <span class="zsp-badge is-sent">قبول مؤكد بالمراجعة</span>
+                                        @if ($invoice->zatca_page_reconciliation_evidence_reference)
+                                            <div class="zsp-small zsp-muted">مرجع الدليل: {{ $invoice->zatca_page_reconciliation_evidence_reference }}</div>
+                                        @endif
+                                        @if ($invoice->zatca_page_reconciliation_notes)
+                                            <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">ملاحظات المراجعة</summary><p>{{ $invoice->zatca_page_reconciliation_notes }}</p></details>
+                                        @endif
+                                    @elseif ($submissionStatus === 'sent')
                                         @php($zatcaResponseDetails = json_decode((string) ($invoice->zatca_page_response ?? ''), true))
                                         @if ((int) ($invoice->zatca_page_status_code ?? 0) === 202)
                                             <span class="zsp-badge is-warning">مقبولة مع تحذيرات</span>
@@ -157,6 +167,16 @@
                                             @endif
                                         @elseif ($invoice->zatca_page_error)
                                             <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">تفاصيل المحاولة</summary><p>{{ $invoice->zatca_page_error }}</p></details>
+                                        @endif
+                                    @elseif ($submissionStatus === 'rejected')
+                                        <span class="zsp-badge is-rejected">رفض موثّق</span>
+                                        @if ($invoice->zatca_page_reconciliation_evidence_reference)
+                                            <div class="zsp-small zsp-muted">مرجع الدليل: {{ $invoice->zatca_page_reconciliation_evidence_reference }}</div>
+                                        @endif
+                                        @if ($invoice->zatca_page_reconciliation_notes)
+                                            <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">ملاحظات المراجعة</summary><p>{{ $invoice->zatca_page_reconciliation_notes }}</p></details>
+                                        @elseif ($invoice->zatca_page_error)
+                                            <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">تفاصيل الخطأ</summary><p>{{ $invoice->zatca_page_error }}</p></details>
                                         @endif
                                     @elseif ($submissionStatus === 'failed')
                                         <span class="zsp-badge is-failed">فشلت</span>
@@ -187,8 +207,15 @@
                                 <td class="zsp-nowrap">
                                     @if ($submissionStatus === 'sent')
                                         <button type="button" disabled class="zsp-action is-done">تم الإرسال</button>
+                                    @elseif ($submissionStatus === 'rejected')
+                                        <button type="button" wire:click="requestSendConfirmation({{ $invoice->id }})" wire:loading.attr="disabled" class="zsp-action is-primary">إعادة المحاولة بعد الرفض الموثّق</button>
                                     @elseif ($submissionStatus === 'uncertain')
-                                        <button type="button" disabled class="zsp-action is-wait">تحتاج مراجعة — ممنوع الإرسال</button>
+                                        @php($reconciliationSubmissionId = $hasLegacyUnknown ? $invoice->zatca_page_legacy_unknown_id : $invoice->zatca_page_submission_id)
+                                        @if (auth()->user()?->hasAnyRole(['super_admin', 'admin']) && $reconciliationSubmissionId)
+                                            <button type="button" wire:click="requestManualReconciliation({{ (int) $reconciliationSubmissionId }})" wire:loading.attr="disabled" class="zsp-action is-wait">توثيق نتيجة المراجعة</button>
+                                        @else
+                                            <button type="button" disabled class="zsp-action is-wait">تحتاج مراجعة — ممنوع الإرسال</button>
+                                        @endif
                                     @elseif ($submissionStatus === 'processing')
                                         @if ($invoice->zatca_page_last_attempt_at && \Illuminate\Support\Carbon::parse($invoice->zatca_page_last_attempt_at)->gt(now()->subMinutes(30)))
                                             <button type="button" disabled class="zsp-action is-wait">قيد التنفيذ</button>
@@ -252,6 +279,102 @@
                                 <span wire:loading wire:target="confirmSendInvoice">جارٍ تجهيز الإرسال...</span>
                             </button>
                         @endif
+                    </div>
+                </section>
+            </div>
+        @endif
+
+        @if ($this->reconcilingSubmission)
+            <div class="zsp-modal-backdrop" wire:keydown.escape.window="cancelManualReconciliation" wire:click.self="cancelManualReconciliation">
+                <section class="zsp-modal" role="dialog" aria-modal="true" aria-labelledby="zsp-reconcile-title" dir="rtl">
+                    <div class="zsp-modal-heading">
+                        <div class="zsp-modal-icon" aria-hidden="true">✓</div>
+                        <div style="flex:1;min-width:0">
+                            <h2 id="zsp-reconcile-title" class="zsp-modal-title">توثيق مراجعة نتيجة زاتكا</h2>
+                            <p class="zsp-description">الإجراء يسجل مراجعة محلية فقط ولا يستعلم من زاتكا ولا يرسل فاتورة.</p>
+                        </div>
+                        <button type="button" class="zsp-modal-close" wire:click="cancelManualReconciliation" aria-label="إغلاق">×</button>
+                    </div>
+
+                    <div class="zsp-modal-warning" role="alert">
+                        <strong>تنبيه أمان:</strong> اختر «مقبولة» أو «مرفوضة» فقط بعد التحقق من بوابة زاتكا الرسمية أو استجابة رسمية محفوظة. لو ما زال الدليل غير حاسم، اختر «لا تزال غير محسومة»؛ وسيظل الإرسال محظورًا.
+                    </div>
+
+                    <div class="zsp-modal-invoice">
+                        <div>
+                            <div class="zsp-field-label" style="margin-bottom:3px">رقم الفاتورة</div>
+                            <div class="zsp-modal-invoice-number">{{ $this->reconcilingSubmission->invoice?->invoice_number ?? ('#' . $this->reconcilingSubmission->invoice_id) }}</div>
+                            <div class="zsp-small zsp-muted">حالة السجل الحالية: {{ $this->reconcilingSubmission->status }}</div>
+                        </div>
+                        <span class="zsp-modal-env">{{ $this->reconcilingSubmission->environment === 'unknown' ? 'البيئة القديمة غير معروفة' : strtoupper($this->reconcilingSubmission->environment) }}</span>
+                    </div>
+
+                    <div style="display:grid;gap:12px">
+                        <label>
+                            <span class="zsp-field-label">نتيجة المراجعة</span>
+                            <select wire:model.live="reconciliationOutcome" class="zsp-input">
+                                <option value="unresolved">لا تزال غير محسومة — أبقِ الحماية</option>
+                                <option value="accepted">قبول مؤكد بدليل رسمي</option>
+                                <option value="rejected">رفض مؤكد بدليل رسمي</option>
+                            </select>
+                            @error('reconciliationOutcome') <span class="zsp-cell-error">{{ $message }}</span> @enderror
+                        </label>
+
+                        <label>
+                            <span class="zsp-field-label">مصدر الدليل</span>
+                            <select wire:model="reconciliationEvidenceType" class="zsp-input">
+                                <option value="zatca_portal">سجل بوابة زاتكا الرسمية</option>
+                                <option value="official_response">استجابة رسمية / رد محفوظ</option>
+                                <option value="other">مصدر آخر — لتوثيق نتيجة غير محسومة فقط</option>
+                            </select>
+                            @error('reconciliationEvidenceType') <span class="zsp-cell-error">{{ $message }}</span> @enderror
+                        </label>
+
+                        @if ($this->reconcilingSubmission->environment === 'unknown' && $reconciliationOutcome !== 'unresolved')
+                            <label>
+                                <span class="zsp-field-label">البيئة المثبتة بالدليل</span>
+                                <select wire:model="reconciliationTargetEnvironment" class="zsp-input">
+                                    <option value="test">Test</option>
+                                    <option value="production">Production</option>
+                                </select>
+                                @error('reconciliationTargetEnvironment') <span class="zsp-cell-error">{{ $message }}</span> @enderror
+                            </label>
+                        @endif
+
+                        <label>
+                            <span class="zsp-field-label">مرجع الدليل (UUID / مرجع البوابة / رقم الرد)</span>
+                            <input type="text" wire:model="reconciliationEvidenceReference" maxlength="255" class="zsp-input" placeholder="أدخل مرجعًا يمكن الرجوع إليه لاحقًا">
+                            @error('reconciliationEvidenceReference') <span class="zsp-cell-error">{{ $message }}</span> @enderror
+                        </label>
+
+                        <label>
+                            <span class="zsp-field-label">ملاحظات المراجعة</span>
+                            <textarea wire:model="reconciliationNotes" rows="3" maxlength="3000" class="zsp-input" placeholder="اشرح ما تمت مراجعته ولماذا يدعم الدليل النتيجة المختارة..."></textarea>
+                            @error('reconciliationNotes') <span class="zsp-cell-error">{{ $message }}</span> @enderror
+                        </label>
+                    </div>
+
+                    <div style="margin-top:18px;border-top:1px solid var(--zsp-border);padding-top:14px">
+                        <h3 class="zsp-title" style="font-size:14px">سجل المراجعات السابقة</h3>
+                        @forelse ($this->reconciliationHistory as $event)
+                            <div style="padding:10px 0;border-bottom:1px solid var(--zsp-border);font-size:11px;line-height:1.9">
+                                <strong>{{ $event->outcome === 'accepted' ? 'قبول موثّق' : ($event->outcome === 'rejected' ? 'رفض موثّق' : 'غير محسوم') }}</strong>
+                                — {{ $event->reconciledBy?->name ?? 'مستخدم غير متاح' }}
+                                — {{ $event->reconciled_at?->format('Y-m-d H:i') ?? '—' }}
+                                <div class="zsp-muted">مصدر الدليل: {{ $event->evidence_type }} | المرجع: {{ $event->evidence_reference }}</div>
+                                <div>{{ $event->notes }}</div>
+                            </div>
+                        @empty
+                            <p class="zsp-note">لا توجد مراجعات موثقة سابقة لهذا السجل.</p>
+                        @endforelse
+                    </div>
+
+                    <div class="zsp-modal-actions">
+                        <button type="button" class="zsp-modal-btn" wire:click="cancelManualReconciliation">إلغاء</button>
+                        <button type="button" class="zsp-modal-btn is-confirm" wire:click="saveManualReconciliation" wire:loading.attr="disabled" wire:target="saveManualReconciliation">
+                            <span wire:loading.remove wire:target="saveManualReconciliation">حفظ المراجعة الموثّقة</span>
+                            <span wire:loading wire:target="saveManualReconciliation">جارٍ الحفظ...</span>
+                        </button>
                     </div>
                 </section>
             </div>
