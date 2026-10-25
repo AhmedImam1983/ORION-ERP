@@ -81,13 +81,22 @@ class ZatcaInvoiceSubmission extends Model
     }
 
     /**
-     * True when the response cannot establish whether ZATCA accepted the invoice.
-     * Only a successful 202 response is treated as a confirmed submission. Known
-     * client-side 4xx rejection responses are definitive except timeout/conflict/rate-limit codes.
+     * ZATCA documents HTTP 200 as accepted without warnings and HTTP 202 as
+     * accepted with warnings. These status codes mean the invoice was accepted.
+     */
+    public static function isAcceptedApiStatus(?int $statusCode): bool
+    {
+        return in_array($statusCode, [200, 202], true);
+    }
+
+    /**
+     * True when a response does not establish whether ZATCA accepted the invoice.
+     * Timeouts, conflicts, rate limits, server errors, and contradictory statuses
+     * must not trigger an automatic retry.
      */
     public static function isAmbiguousApiResponse(?int $statusCode, bool $isSuccess): bool
     {
-        if ($isSuccess && $statusCode === 202) {
+        if (self::isAcceptedApiStatus($statusCode)) {
             return false;
         }
 
@@ -124,11 +133,20 @@ class ZatcaInvoiceSubmission extends Model
             ? null
             : (int) $this->status_code;
 
-        // A known API status code takes precedence over text from a legacy error.
-        // For example, 401 is a definitive rejection even if the error mentions
-        // the reporting step. Timeouts, rate limits, conflicts and server errors
-        // remain ambiguous and require reconciliation.
+        // A failed row with an accepted HTTP code contradicts the saved status.
+        // Reconcile it before retrying, promoting it to SENT only when the stored
+        // response itself contains the matching accepted status code.
+        if ($this->hasAcceptedStoredResponse()) {
+            return true;
+        }
+
         if ($statusCode !== null) {
+            if (self::isAcceptedApiStatus($statusCode)) {
+                return true;
+            }
+
+            // For example, 401 is a definitive rejection even if the error text
+            // mentions the reporting step. Transient/server errors stay ambiguous.
             return self::isAmbiguousApiResponse($statusCode, false);
         }
 
@@ -150,6 +168,33 @@ class ZatcaInvoiceSubmission extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Detect a legacy row marked failed even though its persisted API status says
+     * the invoice was accepted. Only matching stored/database status codes qualify.
+     */
+    public function hasAcceptedStoredResponse(): bool
+    {
+        if ($this->status !== self::STATUS_FAILED || $this->response === null) {
+            return false;
+        }
+
+        $payload = json_decode((string) $this->response, true);
+        if (!is_array($payload)
+            || !isset($payload['status_code'])
+            || !is_numeric($payload['status_code'])) {
+            return false;
+        }
+
+        $responseStatusCode = (int) $payload['status_code'];
+        $storedStatusCode = $this->status_code === null ? null : (int) $this->status_code;
+
+        if ($storedStatusCode !== null && $storedStatusCode !== $responseStatusCode) {
+            return false;
+        }
+
+        return self::isAcceptedApiStatus($responseStatusCode);
     }
 
     public function invoice(): BelongsTo

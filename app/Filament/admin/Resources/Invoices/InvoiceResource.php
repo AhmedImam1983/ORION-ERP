@@ -122,9 +122,16 @@ class InvoiceResource extends Resource
                     }
 
                     if (!empty($result['success'])) {
+                        $acceptedTitle = !empty($result['accepted_with_warnings'])
+                            ? 'تم قبول الفاتورة مع تحذيرات من زاتكا'
+                            : 'تم قبول إرسال الفاتورة من زاتكا';
+                        $apiMessage = !empty($result['api_message'])
+                            ? ' | ملاحظات زاتكا: ' . $result['api_message']
+                            : '';
+
                         Notification::make()
-                            ->title('تم قبول إرسال الفاتورة من زاتكا')
-                            ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | البيئة: ' . $environmentLabel)
+                            ->title($acceptedTitle)
+                            ->body('UUID: ' . ($result['uuid'] ?? '-') . ' | البيئة: ' . $environmentLabel . $apiMessage)
                             ->success()
                             ->send();
                     } else {

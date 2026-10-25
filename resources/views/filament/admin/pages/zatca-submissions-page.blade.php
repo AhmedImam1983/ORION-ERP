@@ -33,6 +33,7 @@
         .zsp-muted{color:var(--zsp-muted)!important}.zsp-small{font-size:11px}.zsp-nowrap{white-space:nowrap}.zsp-cell-error{max-width:230px;white-space:normal;overflow-wrap:anywhere;color:#e11d48;font-size:11px}
         .zsp-badge{display:inline-flex;align-items:center;justify-content:center;gap:5px;border-radius:999px;padding:4px 9px;font-size:10px;font-weight:900;white-space:nowrap}
         .zsp-badge.is-sent{background:#d1fae5;color:#065f46}.dark .zsp-badge.is-sent{background:rgba(16,185,129,.16);color:#6ee7b7}
+        .zsp-badge.is-warning{background:#fef3c7;color:#92400e}.dark .zsp-badge.is-warning{background:rgba(245,158,11,.16);color:#fcd34d}
         .zsp-badge.is-failed{background:#ffe4e6;color:#9f1239}.dark .zsp-badge.is-failed{background:rgba(244,63,94,.16);color:#fda4af}
         .zsp-badge.is-processing{background:#fef3c7;color:#92400e}.dark .zsp-badge.is-processing{background:rgba(245,158,11,.16);color:#fcd34d}
         .zsp-badge.is-uncertain{background:#ffedd5;color:#9a3412}.dark .zsp-badge.is-uncertain{background:rgba(234,88,12,.16);color:#fdba74}
@@ -136,7 +137,15 @@
                                 <td class="zsp-nowrap">{{ number_format((float) $invoice->total, 2) }} {{ $this->currencySymbol }}</td>
                                 <td>
                                     @if ($submissionStatus === 'sent')
-                                        <span class="zsp-badge is-sent">مرسلة بنجاح</span>
+                                        @php($zatcaResponseDetails = json_decode((string) ($invoice->zatca_page_response ?? ''), true))
+                                        @if ((int) ($invoice->zatca_page_status_code ?? 0) === 202)
+                                            <span class="zsp-badge is-warning">مقبولة مع تحذيرات</span>
+                                            @if (!empty($zatcaResponseDetails['api_message']))
+                                                <details class="zsp-cell-error"><summary style="cursor:pointer;margin-top:5px">تفاصيل تحذيرات زاتكا</summary><p>{{ $zatcaResponseDetails['api_message'] }}</p></details>
+                                            @endif
+                                        @else
+                                            <span class="zsp-badge is-sent">مرسلة بنجاح</span>
+                                        @endif
                                         <div class="zsp-small zsp-muted">HTTP {{ $invoice->zatca_page_status_code ?? '—' }}</div>
                                     @elseif ($submissionStatus === 'uncertain')
                                         <span class="zsp-badge is-uncertain">نتيجة غير محسومة</span>

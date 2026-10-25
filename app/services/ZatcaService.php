@@ -99,6 +99,16 @@ class ZatcaService
                     return ['state' => 'sent', 'submission' => $current];
                 }
 
+                // Older code could mark HTTP 200/202 as failed. Recover that row
+                // only when the saved response and database status code agree.
+                if ($current && $current->hasAcceptedStoredResponse()) {
+                    $current->status = ZatcaInvoiceSubmission::STATUS_SENT;
+                    $current->sent_at = $current->sent_at ?? $current->last_attempt_at ?? now();
+                    $current->save();
+
+                    return ['state' => 'sent', 'submission' => $current, 'recovered_legacy_acceptance' => true];
+                }
+
                 // Legacy rows with an unknown environment must not be silently
                 // treated as unsent in either Test or Production.
                 $legacyUnknown = ZatcaInvoiceSubmission::query()
@@ -514,12 +524,19 @@ class ZatcaService
             $isSuccess = ZatcaInvoiceSubmission::normalizeApiSuccessFlag(
                 $reportingModel->IsSuccess ?? null
             );
-            if ($isSuccess === null) {
+            $statusCode = (int) ($reportingModel->StatusCode ?? 0);
+            $apiMessage = trim((string) ($reportingModel->ErrorMessage ?? ''));
+            $accepted = ZatcaInvoiceSubmission::isAcceptedApiStatus($statusCode);
+
+            // The documented HTTP status is authoritative for 200/202. The COM
+            // success flag may be absent or false when a 202 carries warnings.
+            if ($isSuccess === null && !$accepted) {
                 throw new \RuntimeException('تعذر تفسير حقل IsSuccess في استجابة زاتكا؛ نتيجة الإرسال غير محسومة.');
             }
 
-            $statusCode = (int) ($reportingModel->StatusCode ?? 0);
-            $errorMsg   = $isSuccess ? null : ($reportingModel->ErrorMessage ?? 'خطأ غير معروف');
+            $errorMsg = $accepted
+                ? null
+                : ($apiMessage !== '' ? $apiMessage : 'خطأ غير معروف');
             Log::info("ZATCA STEP OK: {$step}");
 
             Log::info('ZATCA Submit', [
@@ -532,9 +549,9 @@ class ZatcaService
                 'error'          => $errorMsg,
             ]);
 
-            $success = $isSuccess && $statusCode === 202;
+            $success = $accepted;
             $uncertainResponse = !$success
-                && ZatcaInvoiceSubmission::isAmbiguousApiResponse($statusCode, $isSuccess);
+                && ZatcaInvoiceSubmission::isAmbiguousApiResponse($statusCode, (bool) ($isSuccess ?? false));
 
             if ($uncertainResponse) {
                 $errorMsg = 'لم يتمكن النظام من تأكيد قبول الفاتورة أو رفضها بصورة قاطعة. لا تعاود الإرسال تلقائيًا.'
@@ -545,6 +562,9 @@ class ZatcaService
                 'status_code' => $statusCode,
                 'is_success' => $isSuccess,
                 'error' => $errorMsg,
+                // Preserve the COM API message because a 202 may carry warnings
+                // while still meaning the invoice was accepted by ZATCA.
+                'api_message' => $apiMessage !== '' ? $apiMessage : null,
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
             $submissionStatus = $success
@@ -576,6 +596,8 @@ class ZatcaService
                 'invoice_hash' => $invoiceHash,
                 'environment'  => $environment,
                 'sending_mode' => $sendingModeName,
+                'accepted_with_warnings' => $statusCode === 202,
+                'api_message'  => $apiMessage !== '' ? $apiMessage : null,
                 'error'        => $errorMsg,
                 'raw_response' => $responseText,
             ];
@@ -669,6 +691,15 @@ class ZatcaService
 
             if ($current && $current->status === ZatcaInvoiceSubmission::STATUS_SENT) {
                 return ['status' => 'sent', 'error' => 'الفاتورة مرسلة بالفعل إلى هذه البيئة.'];
+            }
+
+            // Repair old false-failed rows based on their persisted 200/202 response.
+            if ($current && $current->hasAcceptedStoredResponse()) {
+                $current->status = ZatcaInvoiceSubmission::STATUS_SENT;
+                $current->sent_at = $current->sent_at ?? $current->last_attempt_at ?? now();
+                $current->save();
+
+                return ['status' => 'sent', 'error' => 'تم استعادة حالة القبول من استجابة زاتكا المحفوظة.'];
             }
 
             $legacyUnknown = ZatcaInvoiceSubmission::query()
