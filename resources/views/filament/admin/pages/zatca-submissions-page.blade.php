@@ -43,7 +43,64 @@
         .zsp-action:hover:not(:disabled){transform:translateY(-1px)}.zsp-action:disabled{cursor:not-allowed;opacity:.65}
         .zsp-action.is-primary{background:#7653e9;color:#fff}.zsp-action.is-production{background:#b45309;color:#fff}.zsp-action.is-done{background:#d1fae5;color:#065f46}.dark .zsp-action.is-done{background:rgba(16,185,129,.14);color:#6ee7b7}.zsp-action.is-wait{background:#fef3c7;color:#92400e}
         .zsp-empty{padding:38px 15px!important;text-align:center!important;color:var(--zsp-muted)!important}
-        .zsp-pagination{padding-top:14px;margin-top:14px;border-top:1px solid var(--zsp-border)}
+       /* ZATCA pagination styling */
+.zsp-pagination nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.zsp-pagination nav > div {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.zsp-pagination nav svg {
+    width: 16px !important;
+    height: 16px !important;
+    max-width: 16px !important;
+    display: block;
+    flex-shrink: 0;
+}
+
+.zsp-pagination nav a,
+.zsp-pagination nav button,
+.zsp-pagination nav span[aria-current="page"] > span,
+.zsp-pagination nav span[aria-disabled="true"] > span {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--zsp-border);
+    border-radius: 8px;
+    background: var(--zsp-bg);
+    color: var(--zsp-text);
+    text-decoration: none;
+}
+
+.zsp-pagination nav span[aria-current="page"] > span {
+    background: #7653e9;
+    color: #fff;
+    border-color: #7653e9;
+}
+
+.zsp-pagination nav span[aria-disabled="true"] > span {
+    opacity: .45;
+}
+
+.zsp-pagination nav a:hover {
+    background: var(--zsp-bg-soft);
+}
         .zsp-note{margin:0;color:var(--zsp-muted);font-size:11px;line-height:1.9}
         .zsp-modal-backdrop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.72);backdrop-filter:blur(4px)}
         .zsp-modal{width:min(100%,520px);background:var(--zsp-bg);color:var(--zsp-text);border:1px solid var(--zsp-border);border-radius:18px;padding:24px;box-shadow:0 25px 80px rgba(0,0,0,.38);text-align:right}
