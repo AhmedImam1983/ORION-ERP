@@ -14,7 +14,7 @@ body{font-family:'DejaVu Sans',sans-serif;font-size:9px;color:#182033;direction:
 </head>
 <body>
 <div class="header">
-    <div class="brand">Orion ERP</div>
+    <div class="brand">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div class="title">الميزانية العمومية · Balance Sheet</div>
     <div class="sub">بتاريخ {{ $asOfDate }} @if($showComparison) · مقارنة بتاريخ {{ $comparisonDate }} @endif · تم الاستخراج {{ now()->format('d/m/Y H:i') }}</div>
 </div>
@@ -101,6 +101,6 @@ body{font-family:'DejaVu Sans',sans-serif;font-size:9px;color:#182033;direction:
 </tr>
 </table>
 
-<div class="footer">Orion ERP · Balance Sheet · يعتمد التقرير على القيود المرحلة فقط</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · Balance Sheet · يعتمد التقرير على القيود المرحلة فقط</div>
 </body>
 </html>

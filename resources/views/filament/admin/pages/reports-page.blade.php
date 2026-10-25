@@ -813,17 +813,184 @@
         .rp-operational-row { grid-template-columns:1fr; }
     }
 
-    @media print {
-        .fi-sidebar,.fi-topbar,.rp-head,.rp-filterbar,.rp-kpis,.rp-reports-card { display:none !important; }
-        .rp-main-grid { display:block !important; }
-        .rp-preview-card { border:0 !important;box-shadow:none !important; }
-        .rp-preview-body { padding:0 !important; }
-        .rp-chart { display:none !important; }
-        .rp-table-wrap { max-height:none !important;border:0 !important; }
-        .rp-table { min-width:0 !important;color:#111 !important; }
-        .rp-table thead th { position:static !important;background:#eee !important;color:#222 !important; }
-        .rp-table tbody td { color:#222 !important;border-color:#ddd !important; }
+   @page {
+    size: A4 landscape;
+    margin: 10mm;
+}
+
+@media print {
+    html,
+    body,
+    .fi-body,
+    .fi-main,
+    .fi-page,
+    .fi-page-content,
+    .orion-reports-v3 {
+        background: #fff !important;
+        background-image: none !important;
+        color: #111 !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
     }
+
+    .fi-sidebar,
+    .fi-topbar,
+    .fi-header,
+    .rp-head,
+    .rp-filterbar,
+    .rp-kpis,
+    .rp-reports-card {
+        display: none !important;
+    }
+
+    .rp-main-grid {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow: visible !important;
+    }
+
+    .rp-preview-card,
+    .rp-preview-card * {
+        color: #111 !important;
+        background: #fff !important;
+        background-image: none !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    .rp-preview-card {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        border: 0 !important;
+        overflow: visible !important;
+        break-inside: auto !important;
+    }
+
+    .rp-preview-card .rp-card-head {
+        display: flex !important;
+        border-bottom: 1px solid #bbb !important;
+    }
+
+    .rp-preview-body {
+        display: block !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    .rp-chart {
+        display: none !important;
+    }
+
+    .rp-table-wrap {
+        width: 100% !important;
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+        border: 0 !important;
+    }
+
+    .rp-table {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+        border-collapse: collapse !important;
+        color: #111 !important;
+        font-size: 10px !important;
+    }
+
+    .rp-table thead {
+        display: table-header-group !important;
+    }
+
+    .rp-table thead th {
+        position: static !important;
+        background: #eee !important;
+        color: #111 !important;
+        border: 1px solid #bbb !important;
+    }
+
+    .rp-table tbody tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .rp-table tbody td {
+        color: #111 !important;
+        border: 1px solid #ddd !important;
+    }
+
+    .rp-purple,
+    .rp-green,
+    .rp-red,
+    .rp-amber,
+    .rp-muted,
+    .rp-badge {
+        color: #111 !important;
+    }
+    /* Improve text rendering in Chrome print preview */
+    .orion-reports-v3,
+    .orion-reports-v3 .rp-preview-card,
+    .orion-reports-v3 .rp-preview-card * {
+        font-family: Arial, sans-serif !important;
+        color: #111 !important;
+        -webkit-text-fill-color: #111 !important;
+        text-shadow: none !important;
+        line-height: 1.5 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+
+    .orion-reports-v3 .rp-table th,
+    .orion-reports-v3 .rp-table td {
+        font-size: 9pt !important;
+        line-height: 1.5 !important;
+        padding: 6px !important;
+        vertical-align: middle !important;
+    }
+
+    .orion-reports-v3 .rp-table tbody td {
+        border-color: #ddd !important;
+    }
+    /* Reset Filament layout containers for browser printing */
+    .fi-layout,
+    .fi-main-ctn,
+    .fi-main,
+    .fi-page,
+    .fi-page-content,
+    .fi-page-content-ctn,
+    .fi-body {
+        display: block !important;
+        position: static !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        transform: none !important;
+        contain: none !important;
+    }
+
+    .fi-sidebar,
+    .fi-topbar {
+        display: none !important;
+    }
+
+    .orion-reports-v3,
+    .rp-main-grid,
+    .rp-preview-card,
+    .rp-preview-body,
+    .rp-table-wrap {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
+        transform: none !important;
+        contain: none !important;
+    }
+}
 </style>
 
 <div class="orion-reports-v3" wire:init="loadSalesReport">
@@ -1199,8 +1366,109 @@
 </div>
 
 <script>
-    function printReport() {
-        window.print();
+window.printReport = function () {
+    var source = document.querySelector('.rp-preview-card');
+
+    if (!source) {
+        window.alert('لا توجد معاينة تقرير على الصفحة الحالية.');
+        return;
     }
+
+    var sourceTable = source.querySelector('.rp-table');
+
+    if (!sourceTable) {
+        window.alert('لا يوجد جدول تقرير جاهز للطباعة. اضغط عرض أولاً.');
+        return;
+    }
+
+    var printWindow = window.open('', '_blank', 'width=1100,height=800');
+
+    if (!printWindow) {
+        window.alert('المتصفح منع نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم حاول مرة أخرى.');
+        return;
+    }
+
+    var printDocument = printWindow.document;
+    var titleNode = source.querySelector('.rp-card-title');
+    var subtitleNode = source.querySelector('.rp-card-sub');
+
+    var reportTitle = titleNode && titleNode.innerText
+        ? titleNode.innerText.trim()
+        : 'تقرير Orion ERP';
+
+    var reportSubtitle = subtitleNode && subtitleNode.innerText
+        ? subtitleNode.innerText.trim()
+        : '';
+
+    printDocument.documentElement.setAttribute('lang', 'ar');
+    printDocument.documentElement.setAttribute('dir', 'rtl');
+
+    while (printDocument.head.firstChild) {
+        printDocument.head.removeChild(printDocument.head.firstChild);
+    }
+
+    while (printDocument.body.firstChild) {
+        printDocument.body.removeChild(printDocument.body.firstChild);
+    }
+
+    var charset = printDocument.createElement('meta');
+    charset.setAttribute('charset', 'utf-8');
+    printDocument.head.appendChild(charset);
+
+    var viewport = printDocument.createElement('meta');
+    viewport.setAttribute('name', 'viewport');
+    viewport.setAttribute('content', 'width=device-width, initial-scale=1');
+    printDocument.head.appendChild(viewport);
+
+    printDocument.title = reportTitle;
+
+    var style = printDocument.createElement('style');
+
+    style.textContent = [
+        '@page { size: A4 landscape; margin: 10mm; }',
+        'html, body { margin: 0; padding: 0; background: #fff !important; color: #111 !important; direction: rtl; font-family: Tahoma, Arial, sans-serif !important; }',
+        '* { box-sizing: border-box; }',
+        '.orion-print-report { width: 100%; background: #fff !important; color: #111 !important; }',
+        '.orion-print-title { margin: 0 0 7px; padding: 0 0 8px; border-bottom: 2px solid #444; text-align: center; font-size: 16pt; font-weight: 700; color: #111 !important; }',
+        '.orion-print-subtitle { margin: 0 0 14px; text-align: right; font-size: 9pt; line-height: 1.5; color: #333 !important; }',
+        '.orion-print-report table { display: table; width: 100%; min-width: 0 !important; max-width: 100%; border-collapse: collapse; table-layout: auto; direction: rtl; background: #fff !important; color: #111 !important; font-family: Tahoma, Arial, sans-serif !important; font-size: 9pt; }',
+        '.orion-print-report thead { display: table-header-group; }',
+        '.orion-print-report th, .orion-print-report td { padding: 6px 5px; border: 1px solid #bbb !important; background: #fff !important; color: #111 !important; -webkit-text-fill-color: #111 !important; font-family: Tahoma, Arial, sans-serif !important; font-size: 9pt !important; line-height: 1.45 !important; text-align: right; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; box-shadow: none !important; text-shadow: none !important; }',
+        '.orion-print-report th { background: #eee !important; font-weight: 700; }',
+        '.orion-print-report tr { break-inside: avoid; page-break-inside: avoid; }',
+        '.orion-print-report .rp-progress { display: none !important; }',
+        '.orion-print-report .rp-badge { display: inline; min-width: 0; padding: 0; border: 0; border-radius: 0; font-weight: 400; }',
+        '@media screen { body { max-width: 1400px; margin: 20px auto; padding: 18px; } }'
+    ].join('\n');
+
+    printDocument.head.appendChild(style);
+
+    var report = printDocument.createElement('main');
+    report.className = 'orion-print-report';
+
+    var heading = printDocument.createElement('h1');
+    heading.className = 'orion-print-title';
+    heading.textContent = reportTitle;
+    report.appendChild(heading);
+
+    if (reportSubtitle) {
+        var subtitle = printDocument.createElement('p');
+        subtitle.className = 'orion-print-subtitle';
+        subtitle.textContent = reportSubtitle;
+        report.appendChild(subtitle);
+    }
+
+    var tableClone = sourceTable.cloneNode(true);
+    report.appendChild(tableClone);
+    printDocument.body.appendChild(report);
+
+    printWindow.setTimeout(function () {
+        if (!printWindow.closed) {
+            printWindow.focus();
+            printWindow.print();
+        }
+    }, 700);
+};
 </script>
+
 </x-filament-panels::page>

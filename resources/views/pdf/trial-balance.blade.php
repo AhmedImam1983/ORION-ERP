@@ -26,7 +26,7 @@ $diff=abs($totalDebit-$totalCredit);
 @endphp
 
 <div class="header">
-    <div class="brand">Orion ERP</div>
+    <div class="brand">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div class="title">ميزان المراجعة</div>
     <div class="sub">الفترة من {{ $dateFrom }} إلى {{ $dateTo }} · تاريخ الاستخراج {{ now()->format('d/m/Y H:i') }}</div>
 </div>
@@ -87,6 +87,6 @@ $diff=abs($totalDebit-$totalCredit);
 </tfoot>
 </table>
 
-<div class="footer">Orion ERP · Trial Balance · يعتمد التقرير على القيود المرحلة فقط</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · Trial Balance · يعتمد التقرير على القيود المرحلة فقط</div>
 </body>
 </html>

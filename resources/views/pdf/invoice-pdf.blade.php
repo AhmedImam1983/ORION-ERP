@@ -50,7 +50,7 @@ tbody td { padding: 9px 8px; font-size: 12px; color: #333; }
     {{-- Header --}}
     <div class="header">
         <div class="logo-section">
-            <div class="logo-name">⚡ Orion ERP</div>
+            <div class="logo-name">⚡ {{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
             <div class="logo-sub">نظام إدارة متكامل</div>
         </div>
         <div class="invoice-info">
@@ -157,7 +157,7 @@ tbody td { padding: 9px 8px; font-size: 12px; color: #333; }
 
     {{-- Footer --}}
     <div class="footer">
-        <p>Orion ERP — نظام إدارة متكامل · تم الإنشاء في {{ now()->format('d/m/Y H:i') }}</p>
+        <p>{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} — نظام إدارة متكامل · تم الإنشاء في {{ now()->format('d/m/Y H:i') }}</p>
         <p style="margin-top:4px">هذه الفاتورة صادرة إلكترونياً وصالحة بدون توقيع</p>
     </div>
 

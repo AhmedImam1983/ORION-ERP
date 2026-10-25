@@ -27,7 +27,7 @@ tfoot tr td{background:#6c63ff;color:#fff;font-weight:bold;padding:8px 6px}
 </head>
 <body>
 <div class="header">
-    <div class="logo">⚡ Orion ERP</div>
+    <div class="logo">⚡ {{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div>
         <div class="title">كشف حساب مورد</div>
         <div class="sub">من {{ $dateFrom }} إلى {{ $dateTo }}</div>
@@ -61,6 +61,6 @@ tfoot tr td{background:#6c63ff;color:#fff;font-weight:bold;padding:8px 6px}
         <tr><td colspan="3">الإجمالي</td><td>{{ number_format($totalDebit, 2) }} ر.س</td><td>{{ number_format($totalCredit, 2) }} ر.س</td><td>{{ number_format(abs($closingBalance), 2) }} ر.س {{ $closingBalance >= 0 ? 'علينا' : 'له' }}</td></tr>
     </tfoot>
 </table>
-<div class="footer">Orion ERP · كشف حساب مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · كشف حساب مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
 </body>
 </html>

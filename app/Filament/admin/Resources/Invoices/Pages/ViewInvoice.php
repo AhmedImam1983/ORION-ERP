@@ -5,6 +5,7 @@ namespace App\Filament\Admin\Resources\Invoices\Pages;
 use App\Filament\Admin\Resources\Invoices\InvoiceResource;
 use App\Services\ZatcaService;
 use App\Services\SupplierRefundPostingService;
+use App\Services\PaymentPostingService;
 use App\Models\Treasury;
 use App\Models\BankAccount;
 use Filament\Forms\Components\Select;
@@ -163,6 +164,84 @@ class ViewInvoice extends ViewRecord
                     }
                 }),
 
+            // رد مبلغ مرتجع البيع من خزينة أو بنك، عبر مسار سند الصرف الموحد.
+            Action::make('customer_refund')
+                ->label('رد مبلغ للعميل')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('success')
+                ->visible(fn () =>
+                    $this->record->type === 'sale_return'
+                    && in_array($this->record->status, ['confirmed', 'partial', 'paid'], true)
+                    && app(PaymentPostingService::class)->availableCustomerRefundAmount($this->record) > 0.009
+                )
+                ->modalHeading('رد مبلغ مرتجع البيع للعميل')
+                ->modalDescription(fn () => 'المبلغ المتبقي للرد: ' . number_format(app(PaymentPostingService::class)->availableCustomerRefundAmount($this->record), 2) . ' ر.س متاح بعد تسوية الجزء الذي يقابل مديونية الفاتورة الأصلية.')
+                ->modalSubmitActionLabel('تأكيد رد المبلغ')
+                ->form([
+                    Select::make('source_type')
+                        ->label('مصدر الصرف')
+                        ->options(['treasury' => 'خزينة', 'bank' => 'بنك'])
+                        ->default('treasury')
+                        ->live()
+                        ->required(),
+                    Select::make('treasury_id')
+                        ->label('الخزينة')
+                        ->options(fn () => Treasury::query()->where('is_active', true)
+                            ->orderBy('name')->pluck('name', 'id')->all())
+                        ->searchable()
+                        ->visible(fn ($get) => $get('source_type') === 'treasury')
+                        ->required(fn ($get) => $get('source_type') === 'treasury'),
+                    Select::make('bank_account_id')
+                        ->label('الحساب البنكي')
+                        ->options(fn () => BankAccount::query()->where('is_active', true)
+                            ->orderBy('bank_name')->get()
+                            ->mapWithKeys(fn ($bank) => [$bank->id => trim($bank->bank_name . ' — ' . $bank->account_name)])
+                            ->all())
+                        ->searchable()
+                        ->visible(fn ($get) => $get('source_type') === 'bank')
+                        ->required(fn ($get) => $get('source_type') === 'bank'),
+                                        TextInput::make('amount')
+                        ->label('المبلغ')
+                        ->numeric()->minValue(0.01)
+                        ->maxValue(fn () => app(PaymentPostingService::class)->availableCustomerRefundAmount($this->record))
+                        ->default(fn () => app(PaymentPostingService::class)->availableCustomerRefundAmount($this->record))
+                        ->prefix('ر.س')->required(),
+                    TextInput::make('reference')->label('مرجع خارجي / رقم تحويل')->maxLength(255),
+                    Textarea::make('description')
+                        ->label('البيان')
+                        ->default(fn () => 'رد قيمة مرتجع البيع ' . $this->record->invoice_number)
+                        ->rows(2),
+                ])
+                ->action(function (array $data) {
+                    try {
+                        $voucher = app(PaymentPostingService::class)->post([
+                            ...$data,
+                            'purpose' => 'customer_refund',
+                            'invoice_id' => $this->record->id,
+                            'payment_date' => today(),
+                            'payment_method' => ($data['source_type'] ?? '') === 'bank' ? 'bank_transfer' : 'cash',
+                            'beneficiary_name' => $this->record->customer?->name ?? 'عميل نقدي',
+                        ]);
+
+                        Notification::make()
+                            ->title('تم رد مبلغ المرتجع')
+                            ->body($voucher->voucher_number . ' — ' . number_format((float) $voucher->amount, 2) . ' ر.س')
+                            ->success()->send();
+
+                        $this->redirect(InvoiceResource::getUrl('view', ['record' => $this->record->fresh()]));
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('تعذر رد مبلغ المرتجع')->body($e->getMessage())->danger()->send();
+                    }
+                }),
+            Action::make('create_sale_return')
+                ->label('إنشاء مرتجع بيع')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->url(fn () => InvoiceResource::getUrl('sale-return', ['record' => $this->record]))
+                ->visible(fn () => $this->record->type === 'sale'
+                    && in_array($this->record->status, ['confirmed', 'partial', 'paid'], true)
+                    && !\Illuminate\Support\Facades\DB::table('pos_transactions')
+                        ->where('invoice_id', $this->record->id)->where('type', 'sale')->exists()),
             // استرداد مبلغ من المورد ضد رصيد مرتجع شراء مدين
             Action::make('supplier_refund')
                 ->label('استرداد من المورد')

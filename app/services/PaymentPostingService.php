@@ -216,6 +216,38 @@ class PaymentPostingService
         return [$invoice, (int) $invoice->supplier_id, $payable];
     }
 
+    /**
+     * Refundable cash/bank amount for a sale return after offsetting the original unpaid receivable.
+     */
+    public function availableCustomerRefundAmount(Invoice $return): float
+    {
+        $remaining = round(max((float) $return->total - (float) $return->paid_amount, 0), 2);
+        if ($remaining <= 0.009 || !$return->original_invoice_id) {
+            return $remaining;
+        }
+
+        $original = Invoice::withoutGlobalScopes()->find($return->original_invoice_id);
+        if (!$original || $original->type !== 'sale') {
+            return 0.0;
+        }
+
+        return min($remaining, $this->customerRefundCapacity($original));
+    }
+
+    private function customerRefundCapacity(Invoice $original): float
+    {
+        $returns = Invoice::withoutGlobalScopes()
+            ->where('type', 'sale_return')
+            ->where('original_invoice_id', $original->id)
+            ->whereIn('status', ['confirmed', 'partial', 'paid'])
+            ->get(['total', 'paid_amount']);
+
+        $totalReturnCredits = round((float) $returns->sum('total'), 2);
+        $alreadyRefunded = round((float) $returns->sum('paid_amount'), 2);
+        $originalOutstanding = round(max((float) $original->total - (float) $original->paid_amount, 0), 2);
+
+        return round(max($totalReturnCredits - $originalOutstanding - $alreadyRefunded, 0), 2);
+    }
     private function prepareCustomerRefund(array $data, float $amount): array
     {
         if (empty($data['invoice_id'])) {
@@ -248,6 +280,29 @@ class PaymentPostingService
                 number_format($remaining, 2) .
                 ' ر.س).'
             );
+        }
+
+        if ($invoice->original_invoice_id) {
+            // Lock the original invoice to serialize refund-capacity checks across its returns.
+            $original = Invoice::withoutGlobalScopes()
+                ->whereKey($invoice->original_invoice_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$original || $original->type !== 'sale') {
+                throw new RuntimeException('تعذر تحديد فاتورة البيع الأصلية المرتبطة بهذا المرتجع.');
+            }
+
+            {
+                $availableRefund = min($remaining, $this->customerRefundCapacity($original));
+                if ($amount - $availableRefund > 0.009) {
+                    throw new RuntimeException(
+                        'مبلغ الرد أكبر من الرصيد القابل للاسترداد (' .
+                        number_format($availableRefund, 2) .
+                        ' ر.س). الجزء المقابل لمديونية غير محصلة يُسوّى مع الفاتورة الأصلية ولا يُصرف نقدًا.'
+                    );
+                }
+            }
         }
 
         return [$invoice, $this->account('1201', 'ذمم العملاء')];
