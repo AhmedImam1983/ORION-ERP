@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Invoice;
 use App\Models\User;
 use App\Models\ZatcaInvoiceSubmission;
 use App\Services\ZatcaService;
@@ -17,6 +18,84 @@ class ZatcaManualReconciliationTest extends TestCase
         parent::setUp();
         $this->createMinimalSchema();
         auth()->logout();
+    }
+
+    public function test_retry_claim_allows_a_reviewed_rejection(): void
+    {
+        $submission = $this->submission('test', ZatcaInvoiceSubmission::STATUS_REJECTED);
+        $submission->attempts = 2;
+        $submission->save();
+
+        $result = $this->invokeClaimSubmissionAttempt();
+
+        $submission->refresh();
+        $this->assertSame('claimed', $result['state']);
+        $this->assertSame(ZatcaInvoiceSubmission::STATUS_PROCESSING, $submission->status);
+        $this->assertSame(3, (int) $submission->attempts);
+        $this->assertNull($submission->status_code);
+        $this->assertNull($submission->response);
+    }
+
+    public function test_retry_claim_blocks_an_already_sent_submission(): void
+    {
+        $submission = $this->submission('test', ZatcaInvoiceSubmission::STATUS_SENT);
+        $submission->attempts = 3;
+        $submission->status_code = 202;
+        $submission->response = '{"status_code":202}';
+        $submission->save();
+
+        $result = $this->invokeClaimSubmissionAttempt();
+
+        $submission->refresh();
+        $this->assertSame('sent', $result['state']);
+        $this->assertSame(ZatcaInvoiceSubmission::STATUS_SENT, $submission->status);
+        $this->assertSame(3, (int) $submission->attempts);
+    }
+
+    public function test_retry_claim_blocks_an_uncertain_submission(): void
+    {
+        $submission = $this->submission('test', ZatcaInvoiceSubmission::STATUS_UNCERTAIN);
+        $submission->attempts = 3;
+        $submission->save();
+
+        $result = $this->invokeClaimSubmissionAttempt();
+
+        $submission->refresh();
+        $this->assertSame('uncertain', $result['state']);
+        $this->assertSame(ZatcaInvoiceSubmission::STATUS_UNCERTAIN, $submission->status);
+        $this->assertSame(3, (int) $submission->attempts);
+    }
+
+    public function test_retry_claim_blocks_a_recent_processing_submission(): void
+    {
+        $submission = $this->submission('test', ZatcaInvoiceSubmission::STATUS_PROCESSING);
+        $submission->attempts = 4;
+        $submission->last_attempt_at = now()->subMinutes(5);
+        $submission->save();
+
+        $result = $this->invokeClaimSubmissionAttempt();
+
+        $submission->refresh();
+        $this->assertSame('processing', $result['state']);
+        $this->assertSame(ZatcaInvoiceSubmission::STATUS_PROCESSING, $submission->status);
+        $this->assertSame(4, (int) $submission->attempts);
+    }
+
+    private function invokeClaimSubmissionAttempt(): array
+    {
+        $invoice = new Invoice;
+        $invoice->forceFill(['id' => 1, 'type' => 'sale', 'status' => 'confirmed']);
+        $invoice->exists = true;
+
+        $service = new class extends ZatcaService
+        {
+            public function claimForTest(Invoice $invoice): array
+            {
+                return $this->claimSubmissionAttempt($invoice, 'test', 'simulation');
+            }
+        };
+
+        return $service->claimForTest($invoice);
     }
 
     public function test_admin_can_record_an_accepted_outcome_with_evidence(): void
@@ -182,7 +261,8 @@ class ZatcaManualReconciliationTest extends TestCase
 
     private function actingAsAdmin(): void
     {
-        $user = new class extends User {
+        $user = new class extends User
+        {
             public function hasAnyRole(...$roles): bool
             {
                 return true;
@@ -195,11 +275,11 @@ class ZatcaManualReconciliationTest extends TestCase
 
     private function submission(string $environment, string $status): ZatcaInvoiceSubmission
     {
-        if (!DB::table('invoices')->where('id', 1)->exists()) {
+        if (! DB::table('invoices')->where('id', 1)->exists()) {
             DB::table('invoices')->insert(['id' => 1, 'type' => 'sale', 'status' => 'confirmed']);
         }
 
-        $submission = new ZatcaInvoiceSubmission();
+        $submission = new ZatcaInvoiceSubmission;
         $submission->forceFill([
             'invoice_id' => 1,
             'environment' => $environment,
@@ -215,6 +295,7 @@ class ZatcaManualReconciliationTest extends TestCase
             'sending_mode' => 'simulation',
         ]);
         $submission->save();
+
         return $submission;
     }
 
