@@ -22,7 +22,7 @@ tfoot tr td{background:#4c3fce;color:#fff;font-weight:bold;padding:6px 4px}
 </head>
 <body>
 <div class="header">
-    <div class="logo">⚡ Orion ERP</div>
+    <div class="logo">⚡ {{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div>
         <div class="title">كشف رواتب شهر {{ $month }} {{ $year }}</div>
         <div class="sub">{{ now()->format('d/m/Y H:i') }}</div>
@@ -69,6 +69,6 @@ tfoot tr td{background:#4c3fce;color:#fff;font-weight:bold;padding:6px 4px}
         </tr>
     </tfoot>
 </table>
-<div class="footer">Orion ERP · كشف رواتب · {{ now()->format('d/m/Y H:i') }}</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · كشف رواتب · {{ now()->format('d/m/Y H:i') }}</div>
 </body>
 </html>

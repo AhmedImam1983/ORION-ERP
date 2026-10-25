@@ -208,7 +208,7 @@ class InvoicesTable
                  */
                 ...array_values(array_filter(
                     InvoiceResource::getRecordActions(),
-                    fn ($action) => in_array($action->getName(), ['purchase_return', 'reverse_invoice'], true)
+                    fn ($action) => in_array($action->getName(), ['purchase_return', 'sale_return', 'reverse_invoice'], true)
                 )),
             ])
             ->toolbarActions([

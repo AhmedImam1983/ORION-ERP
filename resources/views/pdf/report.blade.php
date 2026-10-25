@@ -178,7 +178,7 @@ tbody td{padding:7px 6px;font-size:11px;border-bottom:1px solid #eee}
 </table>
     @endif
 
-    <div class="footer">Orion ERP · تقرير مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
+    <div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · تقرير مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
 </div>
 </body>
 </html>

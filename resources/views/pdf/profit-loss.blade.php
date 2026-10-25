@@ -12,7 +12,7 @@ body{font-family:'DejaVu Sans',sans-serif;font-size:9px;color:#182033;direction:
 </head>
 <body>
 <div class="header">
-    <div class="brand">Orion ERP</div>
+    <div class="brand">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div class="title">قائمة الأرباح والخسائر · P&amp;L</div>
     <div class="sub">من {{ $dateFrom }} إلى {{ $dateTo }} @if($showComparison) · مقارنة {{ $comparisonFrom }} إلى {{ $comparisonTo }} @endif · تم الاستخراج {{ now()->format('d/m/Y H:i') }}</div>
 </div>
@@ -100,6 +100,6 @@ body{font-family:'DejaVu Sans',sans-serif;font-size:9px;color:#182033;direction:
 </tr>
 </table>
 
-<div class="footer">Orion ERP · Income Statement · يعتمد التقرير على القيود المرحلة فقط</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · Income Statement · يعتمد التقرير على القيود المرحلة فقط</div>
 </body>
 </html>

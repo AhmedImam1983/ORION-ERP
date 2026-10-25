@@ -27,7 +27,7 @@ tfoot tr td{background:#6c63ff;color:#fff;font-weight:bold;padding:8px 6px}
 </head>
 <body>
 <div class="header">
-    <div class="logo">⚡ Orion ERP</div>
+    <div class="logo">⚡ {{ \App\Models\Setting::get('company_name', 'Orion ERP') }}</div>
     <div>
         <div class="title">كشف حساب عميل</div>
         <div class="sub">من {{ $dateFrom }} إلى {{ $dateTo }}</div>
@@ -66,6 +66,6 @@ tfoot tr td{background:#6c63ff;color:#fff;font-weight:bold;padding:8px 6px}
     </tfoot>
 </table>
 
-<div class="footer">Orion ERP · كشف حساب مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
+<div class="footer">{{ \App\Models\Setting::get('company_name', 'Orion ERP') }} · كشف حساب مُنشأ بتاريخ {{ now()->format('d/m/Y H:i') }}</div>
 </body>
 </html>

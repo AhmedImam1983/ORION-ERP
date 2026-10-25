@@ -7,6 +7,7 @@ use App\Filament\Admin\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Admin\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Admin\Resources\Invoices\Pages\ViewInvoice;
 use App\Filament\Admin\Resources\Invoices\Pages\PurchaseReturn;
+use App\Filament\Admin\Resources\Invoices\Pages\SaleReturn;
 use App\Filament\Admin\Resources\Invoices\Schemas\InvoiceForm;
 use App\Filament\Admin\Resources\Invoices\Schemas\InvoiceInfolist;
 use App\Filament\Admin\Resources\Invoices\Tables\InvoicesTable;
@@ -146,9 +147,20 @@ class InvoiceResource extends Resource
                     in_array($record->type, ['sale'], true)
                     && in_array($record->status, ['confirmed', 'partial', 'paid'], true)
                 ),
+            // مرتجع بيع للفواتير العادية (عمليات POS تظل من شاشة الكاشير).
+            Action::make('sale_return')
+                ->label('إنشاء مرتجع بيع')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->url(fn ($record) => static::getUrl('sale-return', ['record' => $record]))
+                ->visible(fn ($record) =>
+                    $record->type === 'sale'
+                    && in_array($record->status, ['confirmed', 'partial', 'paid'], true)
+                    && !\Illuminate\Support\Facades\DB::table('pos_transactions')
+                        ->where('invoice_id', $record->id)->where('type', 'sale')->exists()
+                ),
 
-
-            // ══ مرتجع شراء مرتبط بالفاتورة الأصلية ════════════════════════
+// ══ مرتجع شراء مرتبط بالفاتورة الأصلية ════════════════════════
             Action::make('purchase_return')
                 ->label('إنشاء مرتجع شراء')
                 ->icon('heroicon-o-arrow-uturn-left')
@@ -251,6 +263,7 @@ class InvoiceResource extends Resource
             'view'            => ViewInvoice::route('/{record}'),
             'edit'            => EditInvoice::route('/{record}/edit'),
             'purchase-return' => PurchaseReturn::route('/{record}/purchase-return'),
+            'sale-return'     => SaleReturn::route('/{record}/sale-return'),
         ];
     }
 
