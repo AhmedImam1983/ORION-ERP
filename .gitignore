@@ -48,3 +48,6 @@ Thumbs.db
 * - Copy.php
 *.bak
 /app/Filament/admin/Pages/inject_pages.py
+
+# Ignore local storage data, backups, and generated files
+/storage/
